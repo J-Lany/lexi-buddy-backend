@@ -11,6 +11,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,10 +25,14 @@ jobs:
 
       - name: Build and push
         uses: docker/build-push-action@v5
+        env:
+          BUILDKIT_PROGRESS: plain
         with:
           context: .
           push: true
           tags: ghcr.io/j-lany/lexy-buddy-backend:main
+          provenance: false
+          outputs: type=image,name=ghcr.io/j-lany/lexy-buddy-backend:main
 
       - name: Trigger Infra Deploy
         uses: peter-evans/repository-dispatch@v3
