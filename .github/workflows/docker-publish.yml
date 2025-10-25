@@ -27,7 +27,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:main
+          tags: ghcr.io/j-lany/lexy-buddy-backend:main
 
       - name: Trigger Infra Deploy
         uses: peter-evans/repository-dispatch@v3
