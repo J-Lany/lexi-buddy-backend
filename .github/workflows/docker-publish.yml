@@ -33,5 +33,5 @@ jobs:
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.INFRA_TRIGGER_TOKEN }}
-          repository: J-Lany/lexy-buddy-infra
+          repository: J-Lany/lexi-buddy-infra
           event-type: deploy
