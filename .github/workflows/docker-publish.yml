@@ -30,9 +30,9 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/j-lany/lexy-buddy-backend:main
+          tags: ghcr.io/j-lany/lexi-buddy-backend:main
           provenance: false
-          outputs: type=image,name=ghcr.io/j-lany/lexy-buddy-backend:main
+          outputs: type=image,name=ghcr.io/j-lany/lexi-buddy-backend:main
 
       - name: Trigger Infra Deploy
         uses: peter-evans/repository-dispatch@v3
