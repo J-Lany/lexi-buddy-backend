@@ -6,17 +6,17 @@ import { MailService } from './mail.service';
   imports: [
     MailerModule.forRoot({
       transport: {
-        host:  process.env.SMTP_HOST,
+        host: process.env.SMTP_HOST,
         port: 587,
         auth: {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS,
-        }
+        },
       },
       defaults: {
         from: '"Lexi Buddy" <noreply@lexibuddy.com>',
       },
-    })
+    }),
   ],
   providers: [MailService],
   exports: [MailService],
