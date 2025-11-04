@@ -5,6 +5,7 @@
   "author": "",
   "private": true,
   "license": "UNLICENSED",
+  "type": "module",
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -19,12 +20,24 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prepare": "husky",
-    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\""
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "migrate:staging": "DATABASE_URL=$DATABASE_URL prisma migrate dev",
+    "deploy:staging": "DATABASE_URL=$DATABASE_URL prisma migrate deploy",
+    "deploy:prod": "DATABASE_URL=$DATABASE_URL prisma migrate deploy",
+    "generate": "prisma generate",
+    "seed": "ts-node prisma/seed.ts"
   },
   "dependencies": {
+    "@nestjs-modules/mailer": "^2.0.2",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@prisma/client": "^6.18.0",
+    "argon2": "^0.44.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.2",
+    "nodemailer": "^7.0.10",
+    "prisma": "^6.18.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
@@ -43,8 +56,8 @@
     "eslint-plugin-prettier": "^5.2.2",
     "globals": "^16.0.0",
     "husky": "^9.1.5",
-    "lint-staged": "^15.2.7",
     "jest": "^30.0.0",
+    "lint-staged": "^15.2.7",
     "prettier": "^3.4.2",
     "source-map-support": "^0.5.21",
     "supertest": "^7.0.0",
@@ -77,5 +90,8 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   }
 }
