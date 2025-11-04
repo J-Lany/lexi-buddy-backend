@@ -23,9 +23,13 @@ export class AuthService {
     const token = randomUUID()
 
     const teacherRole = await this.prisma.role.findFirst({where: {name: "teacher"}})
-    const contactEmail = await this.prisma.contactType.findFirst( { where: {name: "email"}})
 
-    const user = this.prisma.create({
+    if(!teacherRole) throw new BadRequestException("Teacher role not found")
+
+    const contactEmail = await this.prisma.contactType.findFirst( { where: {name: "email"}})
+    if(!contactEmail) throw new BadRequestException("Contact email is not found")
+
+    const user = this.prisma.user.create({
       data: {
         passwordHash: hash,
         roleId: teacherRole.id,
@@ -47,7 +51,7 @@ export class AuthService {
   }
 
   async activate(token: string) {
-    const user = this.prisma.user.findFirst({where: {activationToken: token}})
+    const user = await this.prisma.user.findFirst({where: {activationToken: token}})
 
     if(!user) throw new BadRequestException('Invalid token')
 
