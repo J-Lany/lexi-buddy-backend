@@ -8,7 +8,12 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto/register.dto';
-import {ApiBadRequestResponse, ApiCreatedResponse, ApiOperation, ApiTags} from "@nestjs/swagger";
+import {
+  ApiBadRequestResponse,
+  ApiCreatedResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 
 @ApiTags('auth')
 @Controller('auth')
