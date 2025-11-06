@@ -2,8 +2,10 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "noEmit": false,
-    "declaration": false
+    "declaration": false,
+    "removeComments": true,
+    "sourceMap": true
   },
-  "exclude": ["node_modules", "test", "dist", "**/*.spec.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "test", "node_modules"]
 }
