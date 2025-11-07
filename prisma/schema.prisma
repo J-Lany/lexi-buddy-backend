@@ -1,3 +1,9 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,65 +13,66 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+
 model User {
-  id                Int              @id @default(autoincrement())
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  id Int @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Авторизационные данные
-  passwordHash      String?          // null для Telegram-пользователей
-  verified          Boolean          @default(false)
+  passwordHash String? // null для Telegram-пользователей
+  verified Boolean @default(false)
 
   // Глобальная роль
-  role              Role             @relation(fields: [roleId], references: [id])
-  roleId            Int
+  role Role @relation(fields: [roleId], references: [id])
+  roleId Int
 
-  // Профиль (будешь заполнять позже)
-  firstName         String?
-  lastName          String?
-  level             String?
-  dateOfBirth       DateTime?
-  lastVisit         DateTime?
+  // Профиль (буду заполнять позже)
+  firstName String?
+  lastName String?
+  level String?
+  dateOfBirth DateTime?
+  lastVisit DateTime?
 
   // Activation
-  activationToken   String?
+  activationToken String?
   activationExpires DateTime?
 
-  contacts          UserContact[]
+  contacts UserContact[]
 }
 
 model Role {
-  id          Int         @id @default(autoincrement())
-  name        String       // teacher, student, assistant, admin
+  id Int @id @default(autoincrement())
+  name String // teacher, student, assistant, admin
   description String?
-  scope       String       // global, group
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  scope String // global, group
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  users       User[]
+  users User[]
 }
 
 model ContactType {
-  id          Int         @id @default(autoincrement())
-  name        String      // email, telegram, whatsapp ...
+  id Int @id @default(autoincrement())
+  name String // email, telegram, whatsapp ...
   displayName String?
-  createdAt   DateTime    @default(now())
+  createdAt DateTime @default(now())
 
   userContacts UserContact[]
 }
 
 model UserContact {
-  id            Int          @id @default(autoincrement())
-  createdAt     DateTime     @default(now())
+  id Int @id @default(autoincrement())
+  createdAt DateTime @default(now())
 
   contactValue  String
-  isPrimary     Boolean      @default(false)
-  verified      Boolean      @default(false)
+  isPrimary Boolean @default(false)
+  verified Boolean @default(false)
 
   // Foreign keys
-  user          User         @relation(fields: [userId], references: [id])
-  userId        Int
+  user User @relation(fields: [userId], references: [id])
+  userId Int
 
-  contactType   ContactType  @relation(fields: [contactTypeId], references: [id])
+  contactType ContactType @relation(fields: [contactTypeId], references: [id])
   contactTypeId Int
 }

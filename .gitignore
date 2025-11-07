@@ -2,6 +2,7 @@
 /dist
 /node_modules
 /build
+.history/
 
 # Logs
 logs
@@ -62,3 +63,5 @@ tsconfig.build.tsbuildinfo
 prisma/seed.js
 prisma/seed.js.map
 prisma/seed.d.ts
+
+/generated/prisma

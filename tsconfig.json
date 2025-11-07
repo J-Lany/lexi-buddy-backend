@@ -1,9 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "allowImportingTsExtensions": true,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
     "types": ["node"],
     "lib": ["ES2022"],
     "allowSyntheticDefaultImports": true,

@@ -39,12 +39,6 @@ jobs:
             ghcr.io/j-lany/lexi-buddy-backend:${{ env.BRANCH }}
             ghcr.io/j-lany/lexi-buddy-backend:${{ github.sha }}
 
-      - name: Apply DB migrations (staging)
-        if: env.BRANCH == 'develop'
-        run: |
-          npm ci
-          DATABASE_URL="${{ secrets.STAGING_DATABASE_URL }}" npx prisma migrate deploy
-
       - name: Trigger Infra Deploy
         uses: peter-evans/repository-dispatch@v3
         with:
