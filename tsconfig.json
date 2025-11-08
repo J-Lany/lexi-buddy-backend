@@ -3,7 +3,7 @@
     "target": "ES2022",
     "module": "CommonJS",
     "moduleResolution": "Node",
-    "types": ["node"],
+    "types": ["node", "jest"],
     "lib": ["ES2022"],
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
@@ -25,6 +25,6 @@
     "noUnusedParameters": false,
     "isolatedModules": true
   },
-  "include": ["src/**/*", "prisma/**/*"],
+  "include": ["src/**/*", "prisma/**/*", "jest.config.ts"],
   "exclude": ["node_modules", "dist", "prisma-client.d.ts"]
 }

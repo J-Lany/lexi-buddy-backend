@@ -1,9 +1,0 @@
-node_modules
-dist
-.husky
-.env
-.git
-tsconfig.json
-tsconfig.build.json
-nest-cli.json
-prisma-client.d.ts
