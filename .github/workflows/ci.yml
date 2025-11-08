@@ -14,7 +14,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
+      - run: npm ci --include=dev
       - run: npm run lint --if-present
       - run: npm test --if-present
       - run: npm run build
