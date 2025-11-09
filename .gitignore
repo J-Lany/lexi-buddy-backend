@@ -2,6 +2,7 @@
 /dist
 /node_modules
 /build
+.history/
 
 # Logs
 logs
@@ -54,3 +55,13 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+/generated/prisma
+
+tsconfig.build.tsbuildinfo
+
+prisma/seed.js
+prisma/seed.js.map
+prisma/seed.d.ts
+
+/generated/prisma

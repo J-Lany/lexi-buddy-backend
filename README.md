@@ -96,3 +96,17 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+## Работа с БД
+
+🔁 Рабочий цикл разработчика
+Меняешь schema.prisma
+Создаёшь миграцию:
+
+- npm run migrate:staging -- --name <change>
+  Коммитишь миграцию
+  PUSH
+  CI деплоит backend
+  CI делает deploy миграций
+
+  npx prisma studio - команда открывает в браузере UI БД, и позволяет добавить нужные данные
