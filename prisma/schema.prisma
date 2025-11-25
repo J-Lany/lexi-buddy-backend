@@ -23,6 +23,7 @@ model User {
   // Авторизационные данные
   passwordHash String? // null для Telegram-пользователей
   verified Boolean @default(false)
+  refreshTokenHash String?
 
   // Глобальная роль
   role Role @relation(fields: [roleId], references: [id])

@@ -1,17 +1,24 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import * as argon from 'argon2';
 import { randomUUID } from 'crypto';
+import { JwtService } from '@nestjs/jwt';
 import { MailService } from '../mail/mail.service';
 import { RegisterDto } from './dto/register.dto/register.dto';
 import { UserRepository } from 'repositories/user.repository';
 import { ContactTypeRepository } from 'repositories/contact-type.repository';
 import { RoleRepository } from 'repositories/role.repository';
 import { UserContactRepository } from 'repositories/user-contact.repository';
+import { LoginrDto } from './dto/login.dto/login.dto';
 
 @Injectable()
 export class AuthService {
   constructor(
     private mail: MailService,
+    private jwt: JwtService,
     private userRepo: UserRepository,
     private contactTypeRepo: ContactTypeRepository,
     private userContactRepo: UserContactRepository,
@@ -58,5 +65,48 @@ export class AuthService {
     await this.userRepo.updateUserVerification(user.id);
 
     return { message: 'Account activated' };
+  }
+
+  async login(dto: LoginrDto) {
+    const { email, password } = dto;
+    const user = await this.userRepo.findByEmail(email);
+
+    if (!user || !user.passwordHash) {
+      throw new UnauthorizedException('User by this email is not found');
+    }
+
+    if (!user.verified) {
+      throw new UnauthorizedException('Email not verified. Check your mailbox');
+    }
+
+    const isValid = await argon.verify(user.passwordHash, password);
+    if (!isValid) {
+      throw new UnauthorizedException('Invalid password');
+    }
+
+    const payload = { sub: user.id, roleId: user.roleId };
+    const accessToken = await this.jwt.signAsync(payload, { expiresIn: '15m' });
+    const refreshToken = await this.jwt.signAsync(payload, {
+      expiresIn: '30d',
+    });
+
+    const refreshHash = await argon.hash(refreshToken);
+    await this.userRepo.updateRefreshTokenHash(user.id, refreshHash);
+
+    const response = {
+      accessToken,
+      refreshToken,
+      user: {
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email,
+      },
+    };
+    return response;
+  }
+
+  async logout(userId: number) {
+    await this.userRepo.updateRefreshTokenHash(userId, null);
+    return { message: 'Logged out' };
   }
 }
