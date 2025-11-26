@@ -44,4 +44,32 @@ export class UserRepository {
       },
     });
   }
+
+  async findByEmail(email: string) {
+    return this.prisma.user.findFirst({
+      where: {
+        contacts: {
+          some: {
+            contactValue: email,
+          },
+        },
+      },
+      include: {
+        role: true,
+      },
+    });
+  }
+
+  async updateRefreshTokenHash(userId: number, hash: string | null) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { refreshTokenHash: hash },
+    });
+  }
+
+  async findById(id: number) {
+    return this.prisma.user.findUnique({
+      where: { id },
+    });
+  }
 }
