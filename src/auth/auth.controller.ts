@@ -4,6 +4,7 @@ import {
   Get,
   Post,
   Query,
+  Res,
   BadRequestException,
   UseGuards,
 } from '@nestjs/common';
@@ -14,6 +15,7 @@ import {
   ApiTags,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto/register.dto';
 import { LoginrDto } from './dto/login.dto/login.dto';
@@ -47,8 +49,29 @@ export class AuthController {
   @Post('login')
   @ApiOperation({ summary: 'Register user using email & password' })
   @ApiBadRequestResponse({ description: 'Wrong email or password' })
-  async login(@Body() dto: LoginrDto) {
-    return this.authService.login(dto);
+  async login(
+    @Body() dto: LoginrDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { user, accessToken, refreshToken } =
+      await this.authService.login(dto);
+
+    res.cookie('access_token', accessToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 15 * 60 * 1000,
+    });
+
+    res.cookie('refresh_token', refreshToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/auth/refresh',
+      maxAge: 7 * 24 * 60 * 1000,
+    });
+
+    return user;
   }
 
   @UseGuards(JwtAuthGuard)
