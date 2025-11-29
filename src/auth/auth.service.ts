@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import * as argon from 'argon2';
 import { randomUUID } from 'crypto';
@@ -16,6 +17,7 @@ import { LoginrDto } from './dto/login.dto/login.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly secret = process.env.JWT_SECRET;
   constructor(
     private mail: MailService,
     private jwt: JwtService,
@@ -85,9 +87,13 @@ export class AuthService {
     }
 
     const payload = { sub: user.id, roleId: user.roleId };
-    const accessToken = await this.jwt.signAsync(payload, { expiresIn: '15m' });
+    const accessToken = await this.jwt.signAsync(payload, {
+      expiresIn: '15m',
+      secret: this.secret,
+    });
     const refreshToken = await this.jwt.signAsync(payload, {
       expiresIn: '30d',
+      secret: this.secret,
     });
 
     const refreshHash = await argon.hash(refreshToken);
@@ -108,5 +114,41 @@ export class AuthService {
   async logout(userId: number) {
     await this.userRepo.updateRefreshTokenHash(userId, null);
     return { message: 'Logged out' };
+  }
+
+  async refresh(refreshToken: string) {
+    try {
+      const jwtPayload = await this.jwt.verifyAsync(refreshToken, {
+        secret: this.secret,
+      });
+      const user = await this.userRepo.findById(jwtPayload.sub);
+
+      if (!user || !user.refreshTokenHash) {
+        throw new ForbiddenException('Access denied');
+      }
+
+      const matches = await argon.verify(user.refreshTokenHash, refreshToken);
+
+      if (!matches) {
+        throw new ForbiddenException('Access denied');
+      }
+
+      const payload = { sub: user.id, roleId: user.roleId };
+      const newAccessToken = await this.jwt.signAsync(payload, {
+        secret: this.secret,
+        expiresIn: '15m',
+      });
+      const newRefreshToken = await this.jwt.signAsync(payload, {
+        secret: this.secret,
+        expiresIn: '30d',
+      });
+
+      const newRefreshHash = await argon.hash(newRefreshToken);
+      await this.userRepo.updateRefreshTokenHash(user.id, newRefreshHash);
+
+      return { accessToken: newAccessToken, refreshToken: newRefreshToken };
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
   }
 }

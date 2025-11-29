@@ -5,8 +5,10 @@ import {
   Post,
   Query,
   Res,
+  Req,
   BadRequestException,
   UseGuards,
+  UnauthorizedException,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -15,7 +17,7 @@ import {
   ApiTags,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { Response } from 'express';
+import { Response, Request } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto/register.dto';
 import { LoginrDto } from './dto/login.dto/login.dto';
@@ -81,5 +83,42 @@ export class AuthController {
   @ApiBadRequestResponse({ description: 'User is not found' })
   async logout(@CurrentUser() user: JwtPayload) {
     return this.authService.logout(user.sub);
+  }
+
+  @Post('refresh')
+  @ApiOperation({ summary: 'Refresh token' })
+  @ApiBadRequestResponse({ description: 'Refresh token is not correct' })
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const token = req.cookies['refresh_token'];
+
+    if (!token) throw new UnauthorizedException('No refresh token');
+
+    const { accessToken, refreshToken } = await this.authService.refresh(token);
+
+    res.cookie('access_token', accessToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 15 * 60 * 1000,
+    });
+
+    res.cookie('refresh_token', refreshToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/auth/refresh',
+      maxAge: 7 * 24 * 60 * 1000,
+    });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Get('me')
+  @ApiOperation({ summary: 'Get current user' })
+  getMe(@CurrentUser() user: JwtPayload) {
+    return user;
   }
 }
