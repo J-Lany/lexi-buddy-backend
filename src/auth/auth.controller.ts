@@ -5,10 +5,8 @@ import {
   Post,
   Query,
   Res,
-  Req,
   BadRequestException,
   UseGuards,
-  UnauthorizedException,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -17,7 +15,7 @@ import {
   ApiTags,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { Response, Request } from 'express';
+import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto/register.dto';
 import { LoginrDto } from './dto/login.dto/login.dto';
@@ -81,44 +79,21 @@ export class AuthController {
   @Post('logout')
   @ApiOperation({ summary: 'Logout user using access token' })
   @ApiBadRequestResponse({ description: 'User is not found' })
-  async logout(@CurrentUser() user: JwtPayload) {
-    return this.authService.logout(user.sub);
-  }
-
-  @Post('refresh')
-  @ApiOperation({ summary: 'Refresh token' })
-  @ApiBadRequestResponse({ description: 'Refresh token is not correct' })
-  async refresh(
-    @Req() req: Request,
+  async logout(
+    @CurrentUser() user: JwtPayload,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const token = req.cookies['refresh_token'];
+    await this.authService.logout(user.sub);
 
-    if (!token) throw new UnauthorizedException('No refresh token');
-
-    const { accessToken, refreshToken } = await this.authService.refresh(token);
-
-    res.cookie('access_token', accessToken, {
+    res.cookie('access_token', '', {
       httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 15 * 60 * 1000,
+      expires: new Date(0),
     });
 
-    res.cookie('refresh_token', refreshToken, {
+    res.cookie('refresh_token', '', {
       httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      expires: new Date(0),
       path: '/auth/refresh',
-      maxAge: 7 * 24 * 60 * 1000,
     });
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @Get('me')
-  @ApiOperation({ summary: 'Get current user' })
-  getMe(@CurrentUser() user: JwtPayload) {
-    return user;
   }
 }
