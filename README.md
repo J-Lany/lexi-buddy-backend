@@ -100,13 +100,18 @@ Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
 ## Работа с БД
 
 🔁 Рабочий цикл разработчика
-Меняешь schema.prisma
+Меняешь cхему в schema.prisma
 Создаёшь миграцию:
 
-- npm run migrate:staging -- --name <change>
+- npx prisma migrate dev -n "add_group_flow"
   Коммитишь миграцию
   PUSH
   CI деплоит backend
   CI делает deploy миграций
 
+Добавляешь схему:
+npx prisma generate
+npx prisma migrate dev -n "add_group_flow"
+
 npx prisma studio - команда открывает в браузере UI БД, и позволяет добавить нужные данные
+npx prisma db seed - создает тестовые данные
