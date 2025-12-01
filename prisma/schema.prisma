@@ -40,6 +40,9 @@ model User {
   activationToken String?
   activationExpires DateTime?
 
+  teacherGroups Group[] @relation("TeacherGroups")
+  studentGroups StudentInGroup[] @relation("StudentGroups")
+
   contacts UserContact[]
 }
 
@@ -77,4 +80,25 @@ model UserContact {
 
   contactType ContactType @relation(fields: [contactTypeId], references: [id])
   contactTypeId Int
+}
+
+model Group {
+  id Int @id @default(autoincrement())
+  name String
+  createdAt DateTime @default(now())
+
+  teacherId Int
+  teacher User @relation("TeacherGroups", fields: [teacherId], references: [id])
+
+  students StudentInGroup[]
+}
+
+model StudentInGroup {
+  id Int @id @default(autoincrement())
+
+  student User @relation("StudentGroups", fields: [studentId], references: [id])
+  studentId Int
+
+  group Group @relation(fields: [groupId], references: [id])
+  groupId Int
 }
