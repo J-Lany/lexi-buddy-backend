@@ -13,4 +13,24 @@ export class StudentsService {
 
     return transformGroupsToFlatStudents(students);
   }
+
+  async getGroups(teacherId: number) {
+    const groups = await this.groupRepo.findByTeacher(teacherId);
+
+    return groups.map((group) => ({
+      id: group.id,
+      name: group.name,
+      students: group.students.map((studentInGroup) => ({
+        id: studentInGroup.student.id,
+        name:
+          studentInGroup.student.firstName ||
+          studentInGroup.student.lastName ||
+          '',
+        level: studentInGroup.student.level,
+        telegramValue: studentInGroup.student.contacts.find(
+          (c) => c.contactType.name === 'telegram',
+        )?.contactValue,
+      })),
+    }));
+  }
 }
