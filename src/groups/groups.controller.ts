@@ -6,6 +6,7 @@ import {
   Post,
   Body,
   Param,
+  Query,
   ParseIntPipe,
 } from '@nestjs/common';
 import {
@@ -88,5 +89,22 @@ export class GroupsController {
       groupId,
       studentId,
     );
+  }
+
+  @Post(':groupId/students')
+  @ApiOperation({
+    summary: 'Add a student to an existing group owned by the current teacher',
+  })
+  @ApiCreatedResponse({
+    description: 'Student successfully added to the group',
+  })
+  async addStudentToMyGroup(
+    @CurrentUser() user: JwtPayload,
+    @Param('groupId', ParseIntPipe) groupId: number,
+    @Query('studentId') studentId: number,
+  ) {
+    const teacherId = user.sub;
+
+    return this.groupsService.addStudentToGroup(teacherId, groupId, studentId);
   }
 }

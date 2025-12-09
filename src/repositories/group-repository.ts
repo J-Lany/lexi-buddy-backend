@@ -100,4 +100,29 @@ export class GroupRepository {
       },
     });
   }
+
+  async studentInGroupExists(groupId: number, studentId: number) {
+    return await this.prisma.studentInGroup.findFirst({
+      where: { groupId, studentId },
+    });
+  }
+
+  async addStudentToGroup(groupId: number, studentId: number) {
+    return await this.prisma.studentInGroup.create({
+      data: {
+        groupId,
+        studentId,
+      },
+      select: {
+        student: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            level: true,
+          },
+        },
+      },
+    });
+  }
 }

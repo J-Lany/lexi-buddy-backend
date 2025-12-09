@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { GroupRepository } from 'repositories/group-repository';
 import { CreateGroupDto } from './dto/create-group.dto';
 
@@ -77,5 +81,46 @@ export class GroupsService {
     await this.groupRepo.deleteGroup(groupId);
 
     return { success: true, message: `Group ${groupId} deleted successfully.` };
+  }
+
+  async addStudentToGroup(
+    teacherId: number,
+    groupId: number,
+    studentId: number,
+  ) {
+    const group = await this.groupRepo.findGroupForTeacher(teacherId, groupId);
+    if (!group) {
+      throw new NotFoundException(
+        `Group with ID ${groupId} not found or access denied.`,
+      );
+    }
+
+    const existing = await this.groupRepo.studentInGroupExists(
+      groupId,
+      studentId,
+    );
+    if (existing) {
+      throw new BadRequestException(
+        `Student with ID ${studentId} is already in group ${groupId}.`,
+      );
+    }
+
+    const studentInGroup = await this.groupRepo.addStudentToGroup(
+      groupId,
+      studentId,
+    );
+
+    return {
+      success: true,
+      message: `Student ${studentId} added to group ${groupId}.`,
+      student: {
+        id: studentInGroup.student.id,
+        name:
+          studentInGroup.student.firstName ||
+          studentInGroup.student.lastName ||
+          '',
+        level: studentInGroup.student.level,
+      },
+    };
   }
 }
