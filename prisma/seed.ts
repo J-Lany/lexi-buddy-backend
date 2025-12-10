@@ -12,21 +12,43 @@ async function main() {
   const hashedPassword = await argon2.hash(teacherPassword);
   const teacherEmail = 'anna.ivanovna@example.com';
 
-  // --- 1. Создаем базовые роли ---
-  const roleTeacher = await prisma.role.create({
-    data: { name: 'teacher', scope: 'global', description: 'Преподаватель' },
+  // --- 1. Роли ---
+  let roleTeacher = await prisma.role.findUnique({
+    where: { name: 'teacher' },
   });
-  const roleStudent = await prisma.role.create({
-    data: { name: 'student', scope: 'global', description: 'Студент' },
-  });
+  if (!roleTeacher) {
+    roleTeacher = await prisma.role.create({
+      data: { name: 'teacher', scope: 'global', description: 'Преподаватель' },
+    });
+  }
 
-  // --- 2. Создаем типы контактов ---
-  const contactTypeEmail = await prisma.contactType.create({
-    data: { name: 'email', displayName: 'Email' },
+  let roleStudent = await prisma.role.findUnique({
+    where: { name: 'student' },
   });
-  const contactTypeTelegram = await prisma.contactType.create({
-    data: { name: 'telegram', displayName: 'Telegram ID' },
+  if (!roleStudent) {
+    roleStudent = await prisma.role.create({
+      data: { name: 'student', scope: 'global', description: 'Студент' },
+    });
+  }
+
+  // --- 2. Типы контактов ---
+  let contactTypeEmail = await prisma.contactType.findUnique({
+    where: { name: 'email' },
   });
+  if (!contactTypeEmail) {
+    contactTypeEmail = await prisma.contactType.create({
+      data: { name: 'email', displayName: 'Email' },
+    });
+  }
+
+  let contactTypeTelegram = await prisma.contactType.findUnique({
+    where: { name: 'telegram' },
+  });
+  if (!contactTypeTelegram) {
+    contactTypeTelegram = await prisma.contactType.create({
+      data: { name: 'telegram', displayName: 'Telegram ID' },
+    });
+  }
 
   // --- 3. Создаем пользователя-учителя С ХЕШЕМ ПАРОЛЯ Argon2 ---
   const teacherUser = await prisma.user.create({
@@ -57,6 +79,7 @@ async function main() {
       roleId: roleStudent.id,
       verified: true,
       level: 'B1',
+      ageGroup: 'BETWEEN_18_35',
       contacts: {
         create: [
           {
@@ -84,6 +107,7 @@ async function main() {
       lastName: 'Сидорова',
       roleId: roleStudent.id,
       level: 'A2',
+      ageGroup: 'UNDER_18',
       verified: true,
       contacts: {
         create: [

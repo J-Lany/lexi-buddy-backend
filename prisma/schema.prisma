@@ -14,6 +14,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AgeGroup {
+  UNDER_18
+  BETWEEN_18_35
+  OVER_35
+}
 
 model User {
   id Int @id @default(autoincrement())
@@ -33,8 +38,9 @@ model User {
   firstName String?
   lastName String?
   level String?
-  dateOfBirth DateTime?
+  ageGroup AgeGroup?
   lastVisit DateTime?
+  username String? 
 
   // Activation
   activationToken String?
@@ -70,7 +76,7 @@ model UserContact {
   id Int @id @default(autoincrement())
   createdAt DateTime @default(now())
 
-  contactValue  String
+  contactValue  String 
   isPrimary Boolean @default(false)
   verified Boolean @default(false)
 

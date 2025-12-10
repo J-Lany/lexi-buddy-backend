@@ -10,4 +10,10 @@ export class UserContactRepository {
       where: { contactValue: email },
     });
   }
+
+  async findByTelegram(telegramId: number) {
+    return this.prisma.userContact.findFirst({
+      where: { contactValue: String(telegramId) },
+    });
+  }
 }

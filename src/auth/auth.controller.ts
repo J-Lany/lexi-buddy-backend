@@ -18,6 +18,7 @@ import {
 import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto/register.dto';
+import { RegisterTelegramDto } from './dto/register-telegram.dto/register-telegram.dto';
 import { LoginrDto } from './dto/login.dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -34,6 +35,18 @@ export class AuthController {
   @ApiBadRequestResponse({ description: 'Email already exists' })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
+  }
+
+  @Post('register/telegram')
+  @ApiOperation({ summary: 'Register user using Telegram ID and username' })
+  @ApiCreatedResponse({
+    description: 'User registered and Telegram contact created',
+  })
+  @ApiBadRequestResponse({
+    description: 'Username already exists or Telegram contact type not found',
+  })
+  registerTelegram(@Body() dto: RegisterTelegramDto) {
+    return this.authService.registerTelegram(dto);
   }
 
   @Get('activate')
