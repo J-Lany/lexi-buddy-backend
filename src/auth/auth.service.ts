@@ -14,6 +14,7 @@ import { ContactTypeRepository } from 'repositories/contact-type.repository';
 import { RoleRepository } from 'repositories/role.repository';
 import { UserContactRepository } from 'repositories/user-contact.repository';
 import { LoginrDto } from './dto/login.dto/login.dto';
+import { RegisterTelegramDto } from './dto/register-telegram.dto/register-telegram.dto';
 
 @Injectable()
 export class AuthService {
@@ -57,6 +58,31 @@ export class AuthService {
     await this.mail.sendActivationMail(dto.email, activationToken);
 
     return { message: 'Activation email sent' };
+  }
+
+  async registerTelegram(dto: RegisterTelegramDto) {
+    const existing = await this.userContactRepo.findByTelegram(dto.telegramId);
+    if (existing) throw new BadRequestException('Username already exists');
+
+    const role = await this.roleRepo.findByName('student');
+    if (!role) throw new BadRequestException('Student role not found');
+
+    const contactType = await this.contactTypeRepo.findByName('telegram');
+    if (!contactType)
+      throw new BadRequestException('Telegram contact type not found');
+
+    const user = await this.userRepo.createUserByTelegram({
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      ageGroup: dto.ageGroup,
+      roleId: role.id,
+      username: dto.username,
+      level: dto.level,
+      telegramId: dto.telegramId || 0,
+      contactTypeId: contactType.id,
+    });
+
+    return user;
   }
 
   async activate(token: string) {
