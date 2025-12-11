@@ -1,118 +1,148 @@
-import { Test, TestingModule } from '@nestjs/testing';
+/* eslint-disable @typescript-eslint/unbound-method */
+
 import { AuthService } from './auth.service';
 import { MailService } from '../mail/mail.service';
-import { UserRepository } from '../repositories/user.repository';
-import { RoleRepository } from '../repositories/role.repository';
-import { ContactTypeRepository } from '../repositories/contact-type.repository';
-import { UserContactRepository } from '../repositories/user-contact.repository';
+import { UserRepository } from 'repositories/user.repository';
+import { RoleRepository } from 'repositories/role.repository';
+import { ContactTypeRepository } from 'repositories/contact-type.repository';
+import { UserContactRepository } from 'repositories/user-contact.repository';
 import { BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon from 'argon2';
 
-// 👇 Мокаем весь модуль argon2, чтобы не трогать его нативные свойства
 jest.mock('argon2', () => ({
   hash: jest.fn(),
   verify: jest.fn(),
 }));
 
-describe('AuthService', () => {
+describe('AuthService (unit, manual DI)', () => {
   let service: AuthService;
 
-  const mockMailService = { sendActivationMail: jest.fn() };
-  const mockJwtService = { signAsync: jest.fn() };
-  const mockUserRepo = {
-    createUserByEmail: jest.fn(),
-    findByActivationToken: jest.fn(),
-    updateUserVerification: jest.fn(),
-    findByEmail: jest.fn(),
-    updateRefreshTokenHash: jest.fn(),
-  };
-  const mockRoleRepo = { findByName: jest.fn() };
-  const mockContactTypeRepo = { findByName: jest.fn() };
-  const mockUserContactRepo = { findByEmail: jest.fn() };
+  let mailService: jest.Mocked<MailService>;
+  let jwtService: jest.Mocked<JwtService>;
+  let userRepo: jest.Mocked<UserRepository>;
+  let roleRepo: jest.Mocked<RoleRepository>;
+  let contactTypeRepo: jest.Mocked<ContactTypeRepository>;
+  let userContactRepo: jest.Mocked<UserContactRepository>;
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        AuthService,
-        { provide: MailService, useValue: mockMailService },
-        { provide: JwtService, useValue: mockJwtService },
-        { provide: UserRepository, useValue: mockUserRepo },
-        { provide: RoleRepository, useValue: mockRoleRepo },
-        { provide: ContactTypeRepository, useValue: mockContactTypeRepo },
-        { provide: UserContactRepository, useValue: mockUserContactRepo },
-      ],
-    }).compile();
+  beforeEach(() => {
+    mailService = {
+      sendActivationMail: jest.fn(),
+    } as any;
 
-    service = module.get<AuthService>(AuthService);
+    jwtService = {
+      signAsync: jest.fn(),
+      verifyAsync: jest.fn(),
+    } as any;
+
+    userRepo = {
+      createUserByEmail: jest.fn(),
+      createUserByTelegram: jest.fn(),
+      findByActivationToken: jest.fn(),
+      updateUserVerification: jest.fn(),
+      findByEmail: jest.fn(),
+      updateRefreshTokenHash: jest.fn(),
+      findById: jest.fn(),
+    } as any;
+
+    roleRepo = {
+      findGlobalRole: jest.fn(),
+      findGroupRole: jest.fn(),
+    } as any;
+
+    contactTypeRepo = {
+      findByName: jest.fn(),
+    } as any;
+
+    userContactRepo = {
+      findByEmail: jest.fn(),
+      findByTelegram: jest.fn(),
+    } as any;
+
+    service = new AuthService(
+      mailService,
+      jwtService,
+      userRepo,
+      contactTypeRepo,
+      userContactRepo,
+      roleRepo,
+    );
   });
 
   afterEach(() => {
     jest.clearAllMocks();
   });
 
-  // ───────────────────────────────
-  // REGISTER
-  // ───────────────────────────────
+  // -------------------------------------------------------------------
+  // REGISTER (EMAIL)
+  // -------------------------------------------------------------------
+
   describe('register', () => {
     it('should throw if email already exists', async () => {
-      mockUserContactRepo.findByEmail.mockResolvedValueOnce({ id: 1 });
+      userContactRepo.findByEmail.mockResolvedValueOnce({ id: 1 } as any);
 
       await expect(
         service.register({ email: 'test@mail.com', password: '1234' }),
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('should throw if role not found', async () => {
-      mockUserContactRepo.findByEmail.mockResolvedValueOnce(null);
-      mockRoleRepo.findByName.mockResolvedValueOnce(null);
+    it('should throw if teacher role not found', async () => {
+      userContactRepo.findByEmail.mockResolvedValueOnce(null);
+      roleRepo.findGlobalRole.mockResolvedValueOnce(null as any);
 
       await expect(
         service.register({ email: 'new@mail.com', password: '1234' }),
       ).rejects.toThrow('Teacher role not found');
     });
 
-    it('should call sendActivationMail after successful register', async () => {
-      mockUserContactRepo.findByEmail.mockResolvedValueOnce(null);
-      mockRoleRepo.findByName.mockResolvedValueOnce({ id: 1 });
-      mockContactTypeRepo.findByName.mockResolvedValueOnce({ id: 2 });
-      mockUserRepo.createUserByEmail.mockResolvedValueOnce({});
+    it('should call sendActivationMail after successful registration', async () => {
+      userContactRepo.findByEmail.mockResolvedValueOnce(null);
+      roleRepo.findGlobalRole.mockResolvedValueOnce({ id: 1 } as any);
+      contactTypeRepo.findByName.mockResolvedValueOnce({ id: 2 } as any);
+      userRepo.createUserByEmail.mockResolvedValueOnce({} as any);
 
-      // можно задать поведение hash, если хочется
-      (argon.hash as jest.Mock).mockResolvedValueOnce('password-hash');
+      (argon.hash as jest.Mock).mockResolvedValueOnce('hashed-pass');
 
       await service.register({ email: 'ok@mail.com', password: '1234' });
 
-      expect(mockMailService.sendActivationMail).toHaveBeenCalledWith(
+      expect(mailService.sendActivationMail).toHaveBeenCalledWith(
         'ok@mail.com',
         expect.any(String),
       );
     });
   });
 
+  // -------------------------------------------------------------------
+  // ACTIVATE
+  // -------------------------------------------------------------------
+
   describe('activate', () => {
-    it('should throw if token invalid', async () => {
-      mockUserRepo.findByActivationToken.mockResolvedValueOnce(null);
+    it('should throw if token is invalid', async () => {
+      userRepo.findByActivationToken.mockResolvedValueOnce(null);
 
       await expect(service.activate('invalid')).rejects.toThrow(
         'Invalid token',
       );
     });
 
-    it('should update verification if token valid', async () => {
-      mockUserRepo.findByActivationToken.mockResolvedValueOnce({ id: 1 });
+    it('should mark user as verified if token is valid', async () => {
+      userRepo.findByActivationToken.mockResolvedValueOnce({ id: 1 } as any);
 
-      await service.activate('valid_token');
+      await service.activate('valid-token');
 
-      expect(mockUserRepo.updateUserVerification).toHaveBeenCalledWith(1);
+      expect(userRepo.updateUserVerification).toHaveBeenCalledWith(1);
     });
   });
+
+  // -------------------------------------------------------------------
+  // LOGIN
+  // -------------------------------------------------------------------
 
   describe('login', () => {
     const dto = { email: 'test@mail.com', password: 'pass123' };
 
     it('should throw if user not found', async () => {
-      mockUserRepo.findByEmail.mockResolvedValueOnce(null);
+      userRepo.findByEmail.mockResolvedValueOnce(null);
 
       await expect(service.login(dto)).rejects.toThrow(
         'User by this email is not found',
@@ -120,10 +150,10 @@ describe('AuthService', () => {
     });
 
     it('should throw if email not verified', async () => {
-      mockUserRepo.findByEmail.mockResolvedValueOnce({
+      userRepo.findByEmail.mockResolvedValueOnce({
         passwordHash: 'hash',
         verified: false,
-      });
+      } as any);
 
       await expect(service.login(dto)).rejects.toThrow(
         'Email not verified. Check your mailbox',
@@ -131,30 +161,31 @@ describe('AuthService', () => {
     });
 
     it('should throw if password invalid', async () => {
-      mockUserRepo.findByEmail.mockResolvedValueOnce({
+      userRepo.findByEmail.mockResolvedValueOnce({
         passwordHash: 'hash',
         verified: true,
-      });
+      } as any);
 
       (argon.verify as jest.Mock).mockResolvedValueOnce(false);
 
       await expect(service.login(dto)).rejects.toThrow('Invalid password');
     });
 
-    it('should return tokens and call updateRefreshTokenHash', async () => {
-      mockUserRepo.findByEmail.mockResolvedValueOnce({
+    it('should return tokens and update refresh token hash', async () => {
+      userRepo.findByEmail.mockResolvedValueOnce({
         id: 1,
         roleId: 2,
         verified: true,
         passwordHash: 'hash',
         firstName: 'John',
         lastName: 'Doe',
-      });
+      } as any);
 
       (argon.verify as jest.Mock).mockResolvedValueOnce(true);
       (argon.hash as jest.Mock).mockResolvedValueOnce('refresh-hash');
-      mockJwtService.signAsync.mockResolvedValueOnce('access');
-      mockJwtService.signAsync.mockResolvedValueOnce('refresh');
+      (jwtService.signAsync as jest.Mock)
+        .mockResolvedValueOnce('access')
+        .mockResolvedValueOnce('refresh');
 
       const result = await service.login(dto);
 
@@ -168,20 +199,24 @@ describe('AuthService', () => {
         },
       });
 
-      expect(mockUserRepo.updateRefreshTokenHash).toHaveBeenCalledWith(
+      expect(userRepo.updateRefreshTokenHash).toHaveBeenCalledWith(
         1,
         'refresh-hash',
       );
     });
   });
 
+  // -------------------------------------------------------------------
+  // LOGOUT
+  // -------------------------------------------------------------------
+
   describe('logout', () => {
     it('should remove refresh token hash', async () => {
-      mockUserRepo.updateRefreshTokenHash.mockResolvedValueOnce({});
+      userRepo.updateRefreshTokenHash.mockResolvedValueOnce({} as any);
 
       const result = await service.logout(5);
 
-      expect(mockUserRepo.updateRefreshTokenHash).toHaveBeenCalledWith(5, null);
+      expect(userRepo.updateRefreshTokenHash).toHaveBeenCalledWith(5, null);
       expect(result).toEqual({ message: 'Logged out' });
     });
   });
