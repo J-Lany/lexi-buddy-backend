@@ -101,7 +101,7 @@ export class GroupsController {
   async addStudentToMyGroup(
     @CurrentUser() user: JwtPayload,
     @Param('groupId', ParseIntPipe) groupId: number,
-    @Query('studentId') studentId: number,
+    @Query('studentId', ParseIntPipe) studentId: number,
   ) {
     const teacherId = user.sub;
 

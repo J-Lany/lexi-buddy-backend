@@ -4,11 +4,15 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { GroupRepository } from 'repositories/group-repository';
+import { RoleRepository } from 'repositories/role.repository';
 import { CreateGroupDto } from './dto/create-group.dto';
 
 @Injectable()
 export class GroupsService {
-  constructor(private groupRepo: GroupRepository) {}
+  constructor(
+    private groupRepo: GroupRepository,
+    private roleRepo: RoleRepository,
+  ) {}
 
   async getGroups(teacherId: number) {
     const groups = await this.groupRepo.findByTeacher(teacherId);
@@ -16,24 +20,36 @@ export class GroupsService {
     return groups.map((group) => ({
       id: group.id,
       name: group.name,
-      students: group.students.map((studentInGroup) => ({
-        id: studentInGroup.student.id,
-        name:
-          studentInGroup.student.firstName ||
-          studentInGroup.student.lastName ||
-          '',
-        level: studentInGroup.student.level,
-        telegramValue: studentInGroup.student.contacts.find(
-          (c) => c.contactType.name === 'telegram',
-        )?.contactValue,
-      })),
+      students: group.members.map((member) => {
+        const student = member.user;
+
+        return {
+          id: student.id,
+          name: student.firstName || student.lastName || '',
+          level: student.level,
+          telegramValue: student.contacts.find(
+            (c) => c.contactType.name === 'telegram',
+          )?.contactValue,
+        };
+      }),
     }));
   }
 
   async createGroup(teacherId: number, createGroupDto: CreateGroupDto) {
+    const teacherRole = await this.roleRepo.findGroupRole('teacher');
+    const studentRole = await this.roleRepo.findGroupRole('student');
+
+    if (!teacherRole || !studentRole) {
+      throw new BadRequestException('Group roles not configured');
+    }
+
     const newGroup = await this.groupRepo.createGroup(
       teacherId,
       createGroupDto,
+      {
+        teacherRoleId: teacherRole.id,
+        studentRoleId: studentRole.id,
+      },
     );
 
     return newGroup;
@@ -105,21 +121,24 @@ export class GroupsService {
       );
     }
 
-    const studentInGroup = await this.groupRepo.addStudentToGroup(
+    const studentRole = await this.roleRepo.findGroupRole('student');
+    if (!studentRole) {
+      throw new BadRequestException('Group student role not configured');
+    }
+
+    const member = await this.groupRepo.addStudentToGroup(
       groupId,
       studentId,
+      studentRole.id,
     );
 
     return {
       success: true,
       message: `Student ${studentId} added to group ${groupId}.`,
       student: {
-        id: studentInGroup.student.id,
-        name:
-          studentInGroup.student.firstName ||
-          studentInGroup.student.lastName ||
-          '',
-        level: studentInGroup.student.level,
+        id: member.user.id,
+        name: member.user.firstName || member.user.lastName || '',
+        level: member.user.level,
       },
     };
   }

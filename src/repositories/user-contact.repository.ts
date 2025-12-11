@@ -7,13 +7,19 @@ export class UserContactRepository {
 
   async findByEmail(email: string) {
     return this.prisma.userContact.findFirst({
-      where: { contactValue: email },
+      where: {
+        contactValue: email,
+        contactType: { name: 'email' },
+      },
     });
   }
 
   async findByTelegram(telegramId: number) {
     return this.prisma.userContact.findFirst({
-      where: { contactValue: String(telegramId) },
+      where: {
+        contactValue: String(telegramId),
+        contactType: { name: 'telegram' },
+      },
     });
   }
 }

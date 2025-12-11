@@ -36,7 +36,7 @@ export class AuthService {
     const passwordHash = await argon.hash(dto.password);
     const activationToken = randomUUID();
 
-    const teacherRole = await this.roleRepo.findByName('teacher');
+    const teacherRole = await this.roleRepo.findGlobalRole('teacher');
 
     if (!teacherRole) throw new BadRequestException('Teacher role not found');
 
@@ -64,7 +64,8 @@ export class AuthService {
     const existing = await this.userContactRepo.findByTelegram(dto.telegramId);
     if (existing) throw new BadRequestException('Username already exists');
 
-    const role = await this.roleRepo.findByName('student');
+    const role = await this.roleRepo.findGlobalRole('student');
+
     if (!role) throw new BadRequestException('Student role not found');
 
     const contactType = await this.contactTypeRepo.findByName('telegram');

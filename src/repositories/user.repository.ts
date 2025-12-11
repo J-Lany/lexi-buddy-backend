@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
-import { AgeGroup } from '@prisma/client';
+import { AgeGroup, Level } from '@prisma/client';
 
 @Injectable()
 export class UserRepository {
@@ -43,9 +43,8 @@ export class UserRepository {
     telegramId: number;
     username?: string;
     contactTypeId: number;
-    level?: string;
+    level?: Level; // <–– теперь enum, а не string
   }) {
-    // Создаём пользователя
     const user = await this.prisma.user.create({
       data: {
         firstName: data.firstName,
@@ -87,6 +86,7 @@ export class UserRepository {
         contacts: {
           some: {
             contactValue: email,
+            contactType: { name: 'email' },
           },
         },
       },
