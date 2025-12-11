@@ -32,6 +32,6 @@ import { RoleRepository } from 'repositories/role.repository';
     JwtStrategy,
     JwtAuthGuard,
   ],
-  exports: [AuthService, JwtAuthGuard],
+  exports: [AuthService, JwtAuthGuard, RoleRepository],
 })
 export class AuthModule {}

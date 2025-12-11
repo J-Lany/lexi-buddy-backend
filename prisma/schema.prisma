@@ -5,7 +5,7 @@
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "linux-musl", "linux-musl-openssl-3.0.x"]
 }
 
@@ -14,97 +14,313 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ---------- ENUMS ----------
+
 enum AgeGroup {
   UNDER_18
   BETWEEN_18_35
   OVER_35
 }
 
+enum Level {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum RoleScope {
+  GLOBAL
+  GROUP
+}
+
+enum GroupInviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+enum StudentAssignmentStatus {
+  PENDING
+  COMPLETED
+  GRADED
+}
+
+enum NotificationStatus {
+  SENT
+  READ
+}
+
+// ---------- USERS & ROLES & CONTACTS ----------
+
 model User {
-  id Int @id @default(autoincrement())
+  id       Int     @id @default(autoincrement())
+  username String? @unique
+
+  passwordHash     String? // null для Telegram-пользователей
+  verified         Boolean @default(false)
+  refreshTokenHash String?
+
+  // глобальная роль
+  role   Role @relation(fields: [roleId], references: [id])
+  roleId Int
+
+  firstName String?
+  lastName  String?
+  level     Level?
+  ageGroup  AgeGroup?
+  lastVisit DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Авторизационные данные
-  passwordHash String? // null для Telegram-пользователей
-  verified Boolean @default(false)
-  refreshTokenHash String?
-
-  // Глобальная роль
-  role Role @relation(fields: [roleId], references: [id])
-  roleId Int
-
-  // Профиль (буду заполнять позже)
-  firstName String?
-  lastName String?
-  level String?
-  ageGroup AgeGroup?
-  lastVisit DateTime?
-  username String? 
-
-  // Activation
-  activationToken String?
+  // Activation (доп. к ERD — по желанию)
+  activationToken   String?
   activationExpires DateTime?
 
-  teacherGroups Group[] @relation("TeacherGroups")
-  studentGroups StudentInGroup[] @relation("StudentGroups")
+  // Связи
+  contacts             UserContact[]
+  groupMemberships     GroupMember[]
+  sentGroupInvites     GroupInvite[] @relation("GroupInviteInviter")
+  receivedGroupInvites GroupInvite[] @relation("GroupInviteInvitee")
 
-  contacts UserContact[]
+  createdLessons     Lesson[]            @relation("LessonCreator")
+  studentAssignments StudentAssignment[]
+  notifications      Notification[]
 }
 
 model Role {
-  id Int @id @default(autoincrement())
-  name String // teacher, student, assistant, admin
+  id          Int       @id @default(autoincrement())
+  name        String // 'teacher', 'student', 'assistant', 'admin'
   description String?
-  scope String // global, group
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  scope       RoleScope // GLOBAL / GROUP
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  users User[]
+  users        User[]
+  groupMembers GroupMember[]
+
+  @@unique([name, scope])
 }
 
 model ContactType {
-  id Int @id @default(autoincrement())
-  name String // email, telegram, whatsapp ...
+  id          Int      @id @default(autoincrement())
+  name        String // 'email', 'telegram', 'whatsapp', ...
   displayName String?
-  createdAt DateTime @default(now())
+  createdAt   DateTime @default(now())
 
   userContacts UserContact[]
+
+  @@unique([name])
 }
 
 model UserContact {
-  id Int @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   createdAt DateTime @default(now())
 
-  contactValue  String 
-  isPrimary Boolean @default(false)
-  verified Boolean @default(false)
+  contactValue String // email / telegram id / username etc.
+  isPrimary    Boolean @default(false)
+  verified     Boolean @default(false)
 
-  // Foreign keys
-  user User @relation(fields: [userId], references: [id])
+  user   User @relation(fields: [userId], references: [id])
   userId Int
 
-  contactType ContactType @relation(fields: [contactTypeId], references: [id])
+  contactType   ContactType @relation(fields: [contactTypeId], references: [id])
   contactTypeId Int
+
+  @@unique([contactTypeId, contactValue])
+  @@index([userId])
 }
+
+// ---------- GROUPS ----------
 
 model Group {
-  id Int @id @default(autoincrement())
-  name String
-  createdAt DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  archived    Boolean  @default(false)
 
-  teacherId Int
-  teacher User @relation("TeacherGroups", fields: [teacherId], references: [id])
-
-  students StudentInGroup[]
+  members GroupMember[]
+  lessons Lesson[]
+  invites GroupInvite[]
 }
 
-model StudentInGroup {
-  id Int @id @default(autoincrement())
+model GroupMember {
+  id      Int @id @default(autoincrement())
+  groupId Int
+  userId  Int
+  roleId  Int // роль пользователя в группе
 
-  student User @relation("StudentGroups", fields: [studentId], references: [id])
-  studentId Int
+  joinedAt  DateTime  @default(now())
+  isActive  Boolean   @default(true)
+  removedAt DateTime?
 
   group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  groupId Int
+  user  User  @relation(fields: [userId], references: [id])
+  role  Role  @relation(fields: [roleId], references: [id])
+
+  @@unique([groupId, userId]) // один пользователь в группе не дублируется
+}
+
+model GroupInvite {
+  id        Int               @id @default(autoincrement())
+  groupId   Int
+  inviterId Int
+  inviteeId Int
+  status    GroupInviteStatus @default(PENDING)
+  expiresAt DateTime?
+  message   String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  respondedAt DateTime?
+
+  group   Group @relation(fields: [groupId], references: [id])
+  inviter User  @relation("GroupInviteInviter", fields: [inviterId], references: [id])
+  invitee User  @relation("GroupInviteInvitee", fields: [inviteeId], references: [id])
+
+  @@unique([groupId, inviteeId, status])
+}
+
+// ---------- LESSONS & ASSIGNMENTS ----------
+
+model Lesson {
+  id          Int       @id @default(autoincrement())
+  groupId     Int
+  createdById Int
+  title       String
+  level       Level?
+  ageCategory AgeGroup?
+  topic       String?
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  archived    Boolean   @default(false)
+
+  group     Group @relation(fields: [groupId], references: [id])
+  createdBy User  @relation("LessonCreator", fields: [createdById], references: [id])
+
+  vocab       LessonVocab[]
+  assignments Assignment[]
+}
+
+model LessonVocab {
+  id          Int      @id @default(autoincrement())
+  lessonId    Int
+  term        String
+  translation String?
+  synonyms    Json? // JSONB в Postgres
+  createdAt   DateTime @default(now())
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([lessonId, term])
+  @@index([lessonId])
+}
+
+model AssignmentType {
+  id          Int     @id @default(autoincrement())
+  name        String // 'Definition Quiz', 'Gap Filling', ...
+  description String?
+
+  assignments Assignment[]
+
+  @@unique([name])
+}
+
+model Assignment {
+  id        Int      @id @default(autoincrement())
+  lessonId  Int
+  typeId    Int
+  createdAt DateTime @default(now())
+
+  lesson Lesson         @relation(fields: [lessonId], references: [id])
+  type   AssignmentType @relation(fields: [typeId], references: [id])
+
+  questions          AssignmentQuestion[]
+  studentAssignments StudentAssignment[]
+}
+
+model AssignmentQuestionType {
+  id        Int      @id @default(autoincrement())
+  name      String // multiple_choice, gap_fill, open_text ...
+  createdAt DateTime @default(now())
+
+  questions AssignmentQuestion[]
+
+  @@unique([name])
+}
+
+model AssignmentQuestion {
+  id             Int      @id @default(autoincrement())
+  assignmentId   Int
+  text           String
+  questionTypeId Int
+  createdAt      DateTime @default(now())
+
+  assignment   Assignment             @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  questionType AssignmentQuestionType @relation(fields: [questionTypeId], references: [id])
+
+  answers AssignmentAnswer[]
+  results Result[]
+}
+
+model AssignmentAnswer {
+  id         Int     @id @default(autoincrement())
+  questionId Int
+  text       String
+  isCorrect  Boolean @default(false)
+
+  question AssignmentQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+}
+
+// ---------- STUDENT WORK ----------
+
+model StudentAssignment {
+  id           Int                     @id @default(autoincrement())
+  userId       Int
+  assignmentId Int
+  status       StudentAssignmentStatus @default(PENDING)
+  score        Float?
+  submittedAt  DateTime?
+  gradedAt     DateTime?
+
+  user       User       @relation(fields: [userId], references: [id])
+  assignment Assignment @relation(fields: [assignmentId], references: [id])
+
+  results Result[]
+}
+
+model Result {
+  id                  Int      @id @default(autoincrement())
+  studentAssignmentId Int
+  questionId          Int
+  answer              Json? // текст или JSONB — ответ студента
+  isCorrect           Boolean?
+  responseTimeMs      Int?
+  createdAt           DateTime @default(now())
+
+  studentAssignment StudentAssignment  @relation(fields: [studentAssignmentId], references: [id], onDelete: Cascade)
+  question          AssignmentQuestion @relation(fields: [questionId], references: [id])
+
+  @@index([studentAssignmentId])
+  @@index([questionId])
+}
+
+// ---------- ADDITIONALS ----------
+
+model Notification {
+  id        Int                @id @default(autoincrement())
+  userId    Int
+  message   String
+  status    NotificationStatus @default(SENT)
+  createdAt DateTime           @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }

@@ -9,14 +9,30 @@ export class GroupRepository {
   async findByTeacher(teacherId: number) {
     return this.prisma.group.findMany({
       where: {
-        teacherId: teacherId,
+        members: {
+          some: {
+            userId: teacherId,
+            isActive: true,
+            role: {
+              name: 'teacher',
+              // scope: 'GROUP' – можно добавить, если заведёшь отдельные group-роли
+            },
+          },
+        },
       },
       select: {
-        name: true,
         id: true,
-        students: {
+        name: true,
+        members: {
+          where: {
+            isActive: true,
+            role: {
+              name: 'student',
+              // scope: 'GROUP',
+            },
+          },
           select: {
-            student: {
+            user: {
               select: {
                 id: true,
                 firstName: true,
@@ -40,31 +56,42 @@ export class GroupRepository {
     });
   }
 
-  async createGroup(teacherId: number, createGroupDto: CreateGroupDto) {
-    const { name, studentIds } = createGroupDto;
-    return await this.prisma.group.create({
+  async createGroup(
+    teacherId: number,
+    createGroupDto: CreateGroupDto,
+    roles: { teacherRoleId: number; studentRoleId: number },
+  ) {
+    const { name, description, studentIds } = createGroupDto;
+
+    return this.prisma.group.create({
       data: {
         name,
-        teacher: {
-          connect: { id: teacherId },
-        },
-        students: {
-          createMany:
-            studentIds && studentIds.length > 0
-              ? {
-                  data: studentIds.map((studentId) => ({
-                    studentId: studentId,
-                  })),
-                }
-              : undefined,
+        description,
+        members: {
+          create: [
+            {
+              userId: teacherId,
+              roleId: roles.teacherRoleId,
+              isActive: true,
+            },
+            ...(studentIds?.map((studentId) => ({
+              userId: studentId,
+              roleId: roles.studentRoleId,
+              isActive: true,
+            })) ?? []),
+          ],
         },
       },
       select: {
         id: true,
         name: true,
-        students: {
+        members: {
+          where: {
+            isActive: true,
+            role: { name: 'student' },
+          },
           select: {
-            student: {
+            user: {
               select: {
                 id: true,
                 firstName: true,
@@ -79,17 +106,34 @@ export class GroupRepository {
   }
 
   async removeStudentFromGroup(groupId: number, studentId: number) {
-    return await this.prisma.studentInGroup.deleteMany({
+    return this.prisma.groupMember.updateMany({
       where: {
-        groupId: groupId,
-        studentId: studentId,
+        groupId,
+        userId: studentId,
+        isActive: true,
+      },
+      data: {
+        isActive: false,
+        removedAt: new Date(),
       },
     });
   }
 
   async findGroupForTeacher(teacherId: number, groupId: number) {
-    return this.prisma.group.findUnique({
-      where: { id: groupId, teacherId: teacherId },
+    return this.prisma.group.findFirst({
+      where: {
+        id: groupId,
+        members: {
+          some: {
+            userId: teacherId,
+            isActive: true,
+            role: {
+              name: 'teacher',
+              // scope: 'GROUP',
+            },
+          },
+        },
+      },
     });
   }
 
@@ -102,19 +146,33 @@ export class GroupRepository {
   }
 
   async studentInGroupExists(groupId: number, studentId: number) {
-    return await this.prisma.studentInGroup.findFirst({
-      where: { groupId, studentId },
+    return this.prisma.groupMember.findFirst({
+      where: {
+        groupId,
+        userId: studentId,
+        isActive: true,
+        role: {
+          name: 'student',
+          // scope: 'GROUP',
+        },
+      },
     });
   }
 
-  async addStudentToGroup(groupId: number, studentId: number) {
-    return await this.prisma.studentInGroup.create({
+  async addStudentToGroup(
+    groupId: number,
+    studentId: number,
+    studentRoleId: number,
+  ) {
+    return this.prisma.groupMember.create({
       data: {
         groupId,
-        studentId,
+        userId: studentId,
+        roleId: studentRoleId,
+        isActive: true,
       },
       select: {
-        student: {
+        user: {
           select: {
             id: true,
             firstName: true,
