@@ -8,6 +8,7 @@ const config: Config = {
     '^mail/(.*)$': '<rootDir>/src/mail/$1',
     '^repositories/(.*)$': '<rootDir>/src/repositories/$1',
     '^prisma/(.*)$': '<rootDir>/src/prisma/$1',
+    '^notifications/(.*)$': '<rootDir>/src/notifications/$1',
   },
   testRegex: '.*\\.spec\\.ts$',
   moduleFileExtensions: ['ts', 'js', 'json'],

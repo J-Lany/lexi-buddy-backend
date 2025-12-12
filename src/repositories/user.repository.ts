@@ -43,7 +43,7 @@ export class UserRepository {
     telegramId: number;
     username?: string;
     contactTypeId: number;
-    level?: Level; // <–– теперь enum, а не string
+    level?: Level;
   }) {
     const user = await this.prisma.user.create({
       data: {
@@ -106,6 +106,34 @@ export class UserRepository {
   async findById(id: number) {
     return this.prisma.user.findUnique({
       where: { id },
+    });
+  }
+
+  async findByIdWithContacts(id: number) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      include: {
+        contacts: {
+          include: {
+            contactType: true,
+          },
+        },
+      },
+    });
+  }
+
+  async findByTelegramId(telegramId: string | number) {
+    return this.prisma.user.findFirst({
+      where: {
+        contacts: {
+          some: {
+            contactValue: String(telegramId),
+            contactType: {
+              name: 'telegram',
+            },
+          },
+        },
+      },
     });
   }
 }
