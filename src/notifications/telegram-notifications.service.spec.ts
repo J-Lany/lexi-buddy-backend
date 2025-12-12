@@ -50,22 +50,22 @@ describe('TelegramNotificationsService (unit, manual DI)', () => {
       message: 'Привет, давай заниматься английским?',
     };
 
-    it('should warn and skip when TELEGRAM_BOT_URL is not configured', async () => {
-      delete process.env.TELEGRAM_BOT_URL;
+    it('should warn and skip when TELEGRAM_BOT_INTERNAL_URL is not configured', async () => {
+      delete process.env.TELEGRAM_BOT_INTERNAL_URL;
 
       service = new TelegramNotificationsService(httpService);
 
       await service.sendTeacherRequest(options);
 
       expect(warnSpy).toHaveBeenCalledWith(
-        'TELEGRAM_BOT_URL is not configured, skipping notify',
+        'TELEGRAM_BOT_INTERNAL_URL is not configured, skipping notify',
       );
       expect(httpService.post).not.toHaveBeenCalled();
       expect(mockedFirstValueFrom).not.toHaveBeenCalled();
     });
 
     it('should call http.post with correct URL, payload and headers', async () => {
-      process.env.TELEGRAM_BOT_URL = 'http://telegram-bot:3001';
+      process.env.TELEGRAM_BOT_INTERNAL_URL = 'http://telegram-bot:3001';
       process.env.TELEGRAM_BOT_INTERNAL_TOKEN = 'super-secret';
 
       // пересоздаём сервис после установки env
@@ -98,7 +98,7 @@ describe('TelegramNotificationsService (unit, manual DI)', () => {
     });
 
     it('should log error if http call fails but not throw', async () => {
-      process.env.TELEGRAM_BOT_URL = 'http://telegram-bot:3001';
+      process.env.TELEGRAM_BOT_INTERNAL_URL = 'http://telegram-bot:3001';
       process.env.TELEGRAM_BOT_INTERNAL_TOKEN = 'super-secret';
 
       service = new TelegramNotificationsService(httpService);

@@ -5,8 +5,8 @@ import { firstValueFrom } from 'rxjs';
 @Injectable()
 export class TelegramNotificationsService {
   private readonly logger = new Logger(TelegramNotificationsService.name);
-  private readonly botBaseUrl = process.env.TELEGRAM_BOT_URL; // например: http://telegram-bot:3001
-  private readonly internalToken = process.env.TELEGRAM_BOT_INTERNAL_TOKEN; // shared secret
+  private readonly botBaseUrl = process.env.TELEGRAM_BOT_INTERNAL_URL;
+  private readonly internalToken = process.env.TELEGRAM_BOT_INTERNAL_TOKEN;
 
   constructor(private readonly http: HttpService) {}
 
@@ -17,7 +17,9 @@ export class TelegramNotificationsService {
     message?: string;
   }): Promise<void> {
     if (!this.botBaseUrl) {
-      this.logger.warn('TELEGRAM_BOT_URL is not configured, skipping notify');
+      this.logger.warn(
+        'TELEGRAM_BOT_INTERNAL_URL is not configured, skipping notify',
+      );
       return;
     }
 
