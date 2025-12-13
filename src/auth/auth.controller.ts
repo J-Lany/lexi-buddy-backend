@@ -14,6 +14,8 @@ import {
   ApiOperation,
   ApiTags,
   ApiBearerAuth,
+  ApiOkResponse,
+  ApiNotFoundResponse,
 } from '@nestjs/swagger';
 import { Response } from 'express';
 import { AuthService } from './auth.service';
@@ -85,6 +87,21 @@ export class AuthController {
     });
 
     return user;
+  }
+
+  @Get('by-telegram')
+  @ApiOperation({ summary: 'Get user by Telegram ID (for bot)' })
+  @ApiOkResponse({ description: 'User found' })
+  @ApiNotFoundResponse({ description: 'User not found' })
+  @ApiBadRequestResponse({ description: 'Invalid telegramId' })
+  async getByTelegram(@Query('telegramId') telegramId: string) {
+    if (!telegramId) throw new BadRequestException('Missing telegramId');
+
+    const id = Number(telegramId);
+    if (!Number.isFinite(id))
+      throw new BadRequestException('Invalid telegramId');
+
+    return this.authService.getByTelegramId(id);
   }
 
   @UseGuards(JwtAuthGuard)

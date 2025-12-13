@@ -65,6 +65,36 @@ async function seedCore() {
   console.log('Core data seeded');
 }
 
+// helpers (dev seed)
+async function findUserByEmail(email: string, contactTypeId: number) {
+  const existing = await prisma.userContact.findFirst({
+    where: {
+      contactValue: email,
+      contactTypeId,
+    },
+    include: { user: true },
+  });
+
+  return existing?.user ?? null;
+}
+
+async function ensureUniqueUsername(base: string | null | undefined) {
+  if (!base) return null;
+
+  const normalized = base.trim();
+  if (!normalized) return null;
+
+  const existing = await prisma.user.findUnique({
+    where: { username: normalized },
+  });
+
+  if (!existing) return normalized;
+
+  // если занято — делаем уникальным
+  const suffix = Math.floor(Math.random() * 1_000_000);
+  return `${normalized}_${suffix}`;
+}
+
 // --- DEV/STAGING SEED (тестовые юзеры и группа) ---
 async function seedDevData() {
   console.log('Seeding DEV data (test users, groups)...');
@@ -72,6 +102,13 @@ async function seedDevData() {
   const teacherPassword = 'Password123';
   const hashedPassword = await argon2.hash(teacherPassword);
   const teacherEmail = 'anna.ivanovna@example.com';
+
+  // test telegram data (цифровые id + username)
+  const student1TelegramId = 111111111;
+  const student1TelegramUsername = 'petka';
+
+  const student2TelegramId = 222222222;
+  const student2TelegramUsername = 'mariska';
 
   const globalTeacherRole = await prisma.role.findFirst({
     where: { name: 'teacher', scope: RoleScope.GLOBAL },
@@ -96,23 +133,18 @@ async function seedDevData() {
     throw new Error('Core data not seeded properly before dev seed');
   }
 
-  // учитель
-  const existingTeacherContact = await prisma.userContact.findFirst({
-    where: {
-      contactValue: teacherEmail,
-      contactTypeId: contactTypeEmail.id,
-    },
-    include: {
-      user: true,
-    },
-  });
+  const contactTypeEmailId = contactTypeEmail.id;
+  const contactTypeTelegramId = contactTypeTelegram.id;
 
-  let teacherUser;
+  // -----------------------
+  // TEACHER
+  // -----------------------
+  let teacherUser = await findUserByEmail(teacherEmail, contactTypeEmailId);
 
-  if (existingTeacherContact) {
-    teacherUser = existingTeacherContact.user;
+  if (teacherUser) {
     console.log(`Teacher already exists with email ${teacherEmail}`);
   } else {
+    // username может конфликтовать, поэтому для учителя не задаём или делаем уникальным
     teacherUser = await prisma.user.create({
       data: {
         firstName: 'Анна',
@@ -124,7 +156,7 @@ async function seedDevData() {
           create: [
             {
               contactValue: teacherEmail,
-              contactTypeId: contactTypeEmail.id,
+              contactTypeId: contactTypeEmailId,
               isPrimary: true,
               verified: true,
             },
@@ -132,33 +164,27 @@ async function seedDevData() {
         },
       },
     });
+
     console.log(
       `Created teacher user with email ${teacherEmail}, password: ${teacherPassword}`,
     );
   }
 
-  // студенты
-  const contactTypeEmailId = contactTypeEmail.id;
-  const contactTypeTelegramId = contactTypeTelegram.id;
-
-  // студент 1
+  // -----------------------
+  // STUDENT 1
+  // -----------------------
   const student1Email = 'petr_petrov@example.com';
 
-  const existingStudent1Contact = await prisma.userContact.findFirst({
-    where: {
-      contactValue: student1Email,
-      contactTypeId: contactTypeEmailId,
-    },
-    include: { user: true },
-  });
+  let student1 = await findUserByEmail(student1Email, contactTypeEmailId);
 
-  let student1;
-
-  if (existingStudent1Contact) {
-    student1 = existingStudent1Contact.user;
+  if (student1) {
+    console.log(`Student1 already exists with email ${student1Email}`);
   } else {
+    const username = await ensureUniqueUsername(student1TelegramUsername);
+
     student1 = await prisma.user.create({
       data: {
+        username, // TG username (handle) — хранится в User.username
         firstName: 'Пётр',
         lastName: 'Петров',
         roleId: globalStudentRole.id,
@@ -174,7 +200,8 @@ async function seedDevData() {
               verified: true,
             },
             {
-              contactValue: 'petka',
+              // ВАЖНО: telegramId — цифры, но в БД строкой
+              contactValue: String(student1TelegramId),
               contactTypeId: contactTypeTelegramId,
               isPrimary: false,
               verified: true,
@@ -183,26 +210,27 @@ async function seedDevData() {
         },
       },
     });
+
+    console.log(
+      `Created student1 with email ${student1Email}, telegramId=${student1TelegramId}`,
+    );
   }
 
-  // студент 2
+  // -----------------------
+  // STUDENT 2
+  // -----------------------
   const student2Email = 'maria_sidorova@example.com';
 
-  const existingStudent2Contact = await prisma.userContact.findFirst({
-    where: {
-      contactValue: student2Email,
-      contactTypeId: contactTypeEmailId,
-    },
-    include: { user: true },
-  });
+  let student2 = await findUserByEmail(student2Email, contactTypeEmailId);
 
-  let student2;
-
-  if (existingStudent2Contact) {
-    student2 = existingStudent2Contact.user;
+  if (student2) {
+    console.log(`Student2 already exists with email ${student2Email}`);
   } else {
+    const username = await ensureUniqueUsername(student2TelegramUsername);
+
     student2 = await prisma.user.create({
       data: {
+        username,
         firstName: 'Мария',
         lastName: 'Сидорова',
         roleId: globalStudentRole.id,
@@ -218,7 +246,7 @@ async function seedDevData() {
               verified: true,
             },
             {
-              contactValue: 'mariska',
+              contactValue: String(student2TelegramId),
               contactTypeId: contactTypeTelegramId,
               isPrimary: false,
               verified: true,
@@ -227,9 +255,15 @@ async function seedDevData() {
         },
       },
     });
+
+    console.log(
+      `Created student2 with email ${student2Email}, telegramId=${student2TelegramId}`,
+    );
   }
 
-  // группы
+  // -----------------------
+  // GROUP (teacher + 2 students)
+  // -----------------------
   const groupTeacherRole = await prisma.role.findFirst({
     where: { name: 'teacher', scope: RoleScope.GROUP },
   });
@@ -243,12 +277,12 @@ async function seedDevData() {
 
   const groupName = 'Группа А1 (Продвинутый)';
 
-  let group = await prisma.group.findFirst({
+  const group = await prisma.group.findFirst({
     where: { name: groupName },
   });
 
   if (!group) {
-    group = await prisma.group.create({
+    await prisma.group.create({
       data: {
         name: groupName,
         description: 'Тестовая группа для разработки',
@@ -273,6 +307,7 @@ async function seedDevData() {
         },
       },
     });
+
     console.log(`Created group "${groupName}" with teacher + 2 students`);
   } else {
     console.log(`Group "${groupName}" already exists`);
