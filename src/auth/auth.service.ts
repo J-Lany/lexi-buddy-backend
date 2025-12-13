@@ -3,6 +3,7 @@ import {
   BadRequestException,
   UnauthorizedException,
   ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import * as argon from 'argon2';
 import { randomUUID } from 'crypto';
@@ -94,6 +95,25 @@ export class AuthService {
     await this.userRepo.updateUserVerification(user.id);
 
     return { message: 'Account activated' };
+  }
+
+  async getByTelegramId(telegramId: number) {
+    const user = await this.userRepo.findByTelegramId(telegramId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return {
+      id: user.id,
+      username: user.username,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      level: user.level,
+      ageGroup: user.ageGroup,
+      roleId: user.roleId,
+      verified: user.verified,
+    };
   }
 
   async login(dto: LoginrDto) {
