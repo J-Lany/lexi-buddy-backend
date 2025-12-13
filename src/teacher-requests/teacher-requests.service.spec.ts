@@ -42,6 +42,7 @@ describe('TeacherRequestsService (unit, manual DI)', () => {
       markInviteDeclined: jest.fn(),
       addStudentToGroup: jest.fn(),
       findByTeacher: jest.fn(),
+      findPendingInvite: jest.fn(), // ✅ added after service update
     } as any;
 
     telegramNotifications = {
@@ -111,6 +112,28 @@ describe('TeacherRequestsService (unit, manual DI)', () => {
       );
     });
 
+    it('should throw if invite already pending', async () => {
+      userRepo.findByIdWithContacts.mockResolvedValueOnce({
+        id: 2,
+      } as any);
+      userRepo.findById.mockResolvedValueOnce({ id: 1 } as any);
+
+      roleRepo.findGroupRole.mockResolvedValueOnce({ id: 10 } as any); // teacher group role
+      groupInviteRepo.findPendingInvite.mockResolvedValueOnce({
+        id: 999,
+      } as any);
+
+      await expect(service.requestStudent(1, dto)).rejects.toThrow(
+        'Invite already pending',
+      );
+
+      expect(groupInviteRepo.findPendingInvite).toHaveBeenCalledWith(1, 2);
+      expect(
+        groupInviteRepo.createIndividualGroupWithInvite,
+      ).not.toHaveBeenCalled();
+      expect(telegramNotifications.sendTeacherRequest).not.toHaveBeenCalled();
+    });
+
     it('should create group + invite and NOT call telegram if no telegram contact', async () => {
       userRepo.findByIdWithContacts.mockResolvedValueOnce({
         id: 2,
@@ -133,6 +156,7 @@ describe('TeacherRequestsService (unit, manual DI)', () => {
       } as any);
 
       roleRepo.findGroupRole.mockResolvedValueOnce({ id: 10 } as any); // teacher group role
+      groupInviteRepo.findPendingInvite.mockResolvedValueOnce(null as any); // ✅ new
 
       groupInviteRepo.createIndividualGroupWithInvite.mockResolvedValueOnce({
         group: { id: 100 },
@@ -143,6 +167,8 @@ describe('TeacherRequestsService (unit, manual DI)', () => {
       } as any);
 
       const result = await service.requestStudent(1, dto);
+
+      expect(groupInviteRepo.findPendingInvite).toHaveBeenCalledWith(1, 2);
 
       expect(
         groupInviteRepo.createIndividualGroupWithInvite,
@@ -188,6 +214,7 @@ describe('TeacherRequestsService (unit, manual DI)', () => {
       } as any);
 
       roleRepo.findGroupRole.mockResolvedValueOnce({ id: 10 } as any); // teacher group role
+      groupInviteRepo.findPendingInvite.mockResolvedValueOnce(null as any); // ✅ new
 
       groupInviteRepo.createIndividualGroupWithInvite.mockResolvedValueOnce({
         group: { id: 100 },
@@ -198,6 +225,8 @@ describe('TeacherRequestsService (unit, manual DI)', () => {
       } as any);
 
       const result = await service.requestStudent(1, dto);
+
+      expect(groupInviteRepo.findPendingInvite).toHaveBeenCalledWith(1, 2);
 
       expect(
         groupInviteRepo.createIndividualGroupWithInvite,
