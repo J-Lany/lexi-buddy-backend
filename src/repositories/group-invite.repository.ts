@@ -111,4 +111,14 @@ export class GroupInviteRepository {
       },
     });
   }
+
+  async findPendingInvite(teacherId: number, studentId: number) {
+    return this.prisma.groupInvite.findFirst({
+      where: {
+        inviterId: teacherId,
+        inviteeId: studentId,
+        status: 'PENDING',
+      },
+    });
+  }
 }
