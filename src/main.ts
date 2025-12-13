@@ -16,7 +16,7 @@ async function bootstrap() {
   app.enableCors({
     origin: origins,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-internal-token'],
     credentials: true,
   });
 
@@ -31,6 +31,14 @@ async function bootstrap() {
   const config = new DocumentBuilder()
     .setTitle('Lexi Buddy API')
     .setDescription('API documentation for Lexi Buddy backend')
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      'jwt',
+    )
+    .addApiKey(
+      { type: 'apiKey', name: 'x-internal-token', in: 'header' },
+      'internal-token',
+    )
     .setVersion('1.0')
     .addTag('auth')
     .build();

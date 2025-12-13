@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  ConflictException,
 } from '@nestjs/common';
 import { RoleRepository } from 'repositories/role.repository';
 import { UserRepository } from 'repositories/user.repository';
@@ -43,6 +44,14 @@ export class TeacherRequestsService {
     const teacherGroupRole = await this.roleRepo.findGroupRole('teacher');
     if (!teacherGroupRole) {
       throw new BadRequestException('Group teacher role not configured');
+    }
+
+    const pending = await this.groupInviteRepo.findPendingInvite(
+      teacherId,
+      studentId,
+    );
+    if (pending) {
+      throw new ConflictException('Invite already pending');
     }
 
     const { group, invite } =
@@ -140,5 +149,30 @@ export class TeacherRequestsService {
         username: inv.invitee.username,
       },
     }));
+  }
+
+  async respondFromTelegram(
+    telegramId: number,
+    inviteId: number,
+    accept: boolean,
+  ) {
+    const user = await this.userRepo.findByTelegramId(telegramId);
+    if (!user) throw new NotFoundException('Student not found');
+
+    try {
+      return await this.respondToRequest(user.id, inviteId, {
+        action: accept
+          ? TeacherRequestAction.ACCEPT
+          : TeacherRequestAction.DECLINE,
+      });
+    } catch (e: unknown) {
+      if (
+        e instanceof BadRequestException &&
+        e.message?.includes('Invite already processed')
+      ) {
+        throw new ConflictException('Invite already processed');
+      }
+      throw e;
+    }
   }
 }

@@ -40,6 +40,7 @@ export class TelegramNotificationsService {
         }),
       );
     } catch (error) {
+      console.log(error);
       const errorMessage =
         error instanceof Error ? error.message : String(error);
 
