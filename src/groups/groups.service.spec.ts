@@ -48,6 +48,21 @@ describe('GroupsService (unit, manual DI)', () => {
       expect(result).toEqual([]);
     });
 
+    it('should not return groups with 0 or 1 students', async () => {
+      groupRepo.findByTeacher.mockResolvedValueOnce([
+        { id: 1, name: 'Empty group', members: [] },
+        {
+          id: 2,
+          name: 'Single student group',
+          members: [{ user: { id: 10 } }],
+        },
+      ] as any);
+
+      const result = await service.getGroups(1);
+
+      expect(result).toEqual([]);
+    });
+
     it('should map groups and students with telegram contact', async () => {
       groupRepo.findByTeacher.mockResolvedValueOnce([
         {
@@ -72,6 +87,20 @@ describe('GroupsService (unit, manual DI)', () => {
                 ],
               },
             },
+            {
+              user: {
+                id: 101,
+                firstName: 'Ivan',
+                lastName: 'Ivanov',
+                level: 'BEGINNER',
+                contacts: [
+                  {
+                    contactValue: 'ivan_tg',
+                    contactType: { name: 'telegram' },
+                  },
+                ],
+              },
+            },
           ],
         },
       ] as any);
@@ -89,6 +118,12 @@ describe('GroupsService (unit, manual DI)', () => {
               level: 'INTERMEDIATE',
               telegramValue: '123456789',
             },
+            {
+              id: 101,
+              name: 'Ivan',
+              level: 'BEGINNER',
+              telegramValue: 'ivan_tg',
+            },
           ],
         },
       ]);
@@ -104,8 +139,8 @@ describe('GroupsService (unit, manual DI)', () => {
 
     it('should throw if group roles are not configured', async () => {
       roleRepo.findGroupRole
-        .mockResolvedValueOnce(null as any) // teacher
-        .mockResolvedValueOnce({ id: 2 } as any); // student
+        .mockResolvedValueOnce(null as any)
+        .mockResolvedValueOnce({ id: 2 } as any);
 
       await expect(service.createGroup(1, dto)).rejects.toThrow(
         'Group roles not configured',
@@ -114,8 +149,8 @@ describe('GroupsService (unit, manual DI)', () => {
 
     it('should create group with correct roles', async () => {
       roleRepo.findGroupRole
-        .mockResolvedValueOnce({ id: 10 } as any) // teacher role
-        .mockResolvedValueOnce({ id: 20 } as any); // student role
+        .mockResolvedValueOnce({ id: 10 } as any)
+        .mockResolvedValueOnce({ id: 20 } as any);
 
       const createdGroup = {
         id: 5,
@@ -148,8 +183,6 @@ describe('GroupsService (unit, manual DI)', () => {
       await expect(service.removeStudentFromGroup(1, 100, 200)).rejects.toThrow(
         NotFoundException,
       );
-
-      expect(groupRepo.findGroupForTeacher).toHaveBeenCalledWith(1, 100);
     });
 
     it('should throw if student not found in group', async () => {

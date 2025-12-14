@@ -16,8 +16,11 @@ export class GroupsService {
 
   async getGroups(teacherId: number) {
     const groups = await this.groupRepo.findByTeacher(teacherId);
+    const groupsWithMultipleStudents = groups.filter(
+      (group) => group.members.length > 1,
+    );
 
-    return groups.map((group) => ({
+    return groupsWithMultipleStudents.map((group) => ({
       id: group.id,
       name: group.name,
       students: group.members.map((member) => {
