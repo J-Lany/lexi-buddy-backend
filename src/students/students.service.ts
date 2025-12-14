@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { GroupRepository } from 'repositories/group-repository';
 import { StudentDto } from './dto/student.dto';
+
 @Injectable()
 export class StudentsService {
   constructor(private groupRepo: GroupRepository) {}
@@ -22,9 +23,7 @@ export class StudentsService {
           id: user.id,
           name: user.firstName || user.lastName || '',
           level: user.level,
-          telegramValue:
-            user.contacts.find((c) => c.contactType.name === 'telegram')
-              ?.contactValue ?? null,
+          username: user.username,
         });
       }
     }

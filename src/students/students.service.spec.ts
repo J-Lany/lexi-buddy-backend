@@ -54,12 +54,7 @@ describe('StudentsService (unit, manual DI)', () => {
                 firstName: 'Petr',
                 lastName: 'Petrov',
                 level: 'INTERMEDIATE',
-                contacts: [
-                  {
-                    contactValue: '111',
-                    contactType: { name: 'telegram' },
-                  },
-                ],
+                username: undefined,
               },
             },
           ],
@@ -74,12 +69,7 @@ describe('StudentsService (unit, manual DI)', () => {
                 firstName: 'Petr',
                 lastName: 'Petrov',
                 level: 'INTERMEDIATE',
-                contacts: [
-                  {
-                    contactValue: '111',
-                    contactType: { name: 'telegram' },
-                  },
-                ],
+                username: undefined,
               },
             },
             {
@@ -88,12 +78,7 @@ describe('StudentsService (unit, manual DI)', () => {
                 firstName: null,
                 lastName: 'Sidorova',
                 level: 'BEGINNER',
-                contacts: [
-                  {
-                    contactValue: 'sidora',
-                    contactType: { name: 'telegram' },
-                  },
-                ],
+                username: undefined,
               },
             },
           ],
@@ -107,13 +92,13 @@ describe('StudentsService (unit, manual DI)', () => {
           id: 100,
           name: 'Petr', // берётся firstName
           level: 'INTERMEDIATE',
-          telegramValue: '111',
+          username: undefined,
         },
         {
           id: 200,
           name: 'Sidorova', // firstName null, берём lastName
           level: 'BEGINNER',
-          telegramValue: 'sidora',
+          username: undefined,
         },
       ]);
     });
@@ -130,12 +115,7 @@ describe('StudentsService (unit, manual DI)', () => {
                 firstName: 'Petr',
                 lastName: 'Petrov',
                 level: 'INTERMEDIATE',
-                contacts: [
-                  {
-                    contactValue: 'petr@example.com',
-                    contactType: { name: 'email' },
-                  },
-                ],
+                username: undefined,
               },
             },
           ],
@@ -149,7 +129,7 @@ describe('StudentsService (unit, manual DI)', () => {
           id: 100,
           name: 'Petr',
           level: 'INTERMEDIATE',
-          telegramValue: null,
+          username: undefined,
         },
       ]);
     });

@@ -15,7 +15,6 @@ export class GroupRepository {
             isActive: true,
             role: {
               name: 'teacher',
-              // scope: 'GROUP' – можно добавить, если заведёшь отдельные group-роли
             },
           },
         },
@@ -28,7 +27,6 @@ export class GroupRepository {
             isActive: true,
             role: {
               name: 'student',
-              // scope: 'GROUP',
             },
           },
           select: {
@@ -38,6 +36,7 @@ export class GroupRepository {
                 firstName: true,
                 lastName: true,
                 level: true,
+                username: true,
                 contacts: {
                   select: {
                     contactValue: true,
