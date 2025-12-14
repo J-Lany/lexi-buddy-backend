@@ -12,5 +12,5 @@ export class StudentDto {
   level: Level | null = null;
 
   @ApiProperty({ required: false, nullable: true })
-  telegramValue: string | null = null;
+  username: string | null = null;
 }
