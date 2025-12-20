@@ -60,12 +60,13 @@ export class GroupRepository {
     createGroupDto: CreateGroupDto,
     roles: { teacherRoleId: number; studentRoleId: number },
   ) {
-    const { name, description, studentIds } = createGroupDto;
+    const { name, description, studentIds, level } = createGroupDto;
 
     return this.prisma.group.create({
       data: {
         name,
         description,
+        level,
         members: {
           create: [
             {

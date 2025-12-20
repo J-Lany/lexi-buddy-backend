@@ -23,9 +23,12 @@ enum AgeGroup {
 }
 
 enum Level {
-  BEGINNER
-  INTERMEDIATE
-  ADVANCED
+  A1
+  A2
+  B1
+  B2
+  C1
+  C2
 }
 
 enum RoleScope {
@@ -138,6 +141,7 @@ model Group {
   id          Int      @id @default(autoincrement())
   name        String
   description String?
+  level     Level?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   archived    Boolean  @default(false)

@@ -189,7 +189,7 @@ async function seedDevData() {
         lastName: 'Петров',
         roleId: globalStudentRole.id,
         verified: true,
-        level: Level.INTERMEDIATE,
+        level: Level.A1,
         ageGroup: AgeGroup.BETWEEN_18_35,
         contacts: {
           create: [
@@ -235,7 +235,7 @@ async function seedDevData() {
         lastName: 'Сидорова',
         roleId: globalStudentRole.id,
         verified: true,
-        level: Level.BEGINNER,
+        level: Level.C1,
         ageGroup: AgeGroup.UNDER_18,
         contacts: {
           create: [

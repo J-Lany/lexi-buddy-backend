@@ -6,7 +6,9 @@ import {
   Query,
   Res,
   BadRequestException,
+  UnauthorizedException,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -16,8 +18,9 @@ import {
   ApiBearerAuth,
   ApiOkResponse,
   ApiNotFoundResponse,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { Response } from 'express';
+import { Response, Request } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto/register.dto';
 import { RegisterTelegramDto } from './dto/register-telegram.dto/register-telegram.dto';
@@ -83,10 +86,46 @@ export class AuthController {
       sameSite: 'lax',
       secure: process.env.NODE_ENV === 'production',
       path: '/auth/refresh',
-      maxAge: 7 * 24 * 60 * 1000,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
     return user;
+  }
+
+  @Post('refresh')
+  @ApiOperation({
+    summary: 'Refresh access & refresh tokens using refresh cookie',
+  })
+  @ApiOkResponse({ description: 'Tokens refreshed' })
+  @ApiUnauthorizedResponse({ description: 'Invalid or missing refresh token' })
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const refreshToken = req.cookies?.refresh_token;
+    if (!refreshToken) {
+      throw new UnauthorizedException('Missing refresh token');
+    }
+
+    const { accessToken, refreshToken: newRefreshToken } =
+      await this.authService.refresh(refreshToken);
+
+    res.cookie('access_token', accessToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 15 * 60 * 1000, // 15m
+    });
+
+    res.cookie('refresh_token', newRefreshToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/auth/refresh',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    return { message: 'Tokens refreshed' };
   }
 
   @Get('by-telegram')
