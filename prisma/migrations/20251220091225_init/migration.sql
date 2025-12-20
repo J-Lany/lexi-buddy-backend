@@ -2,7 +2,7 @@
 CREATE TYPE "AgeGroup" AS ENUM ('UNDER_18', 'BETWEEN_18_35', 'OVER_35');
 
 -- CreateEnum
-CREATE TYPE "Level" AS ENUM ('BEGINNER', 'INTERMEDIATE', 'ADVANCED');
+CREATE TYPE "Level" AS ENUM ('A1', 'A2', 'B1', 'B2', 'C1', 'C2');
 
 -- CreateEnum
 CREATE TYPE "RoleScope" AS ENUM ('GLOBAL', 'GROUP');
@@ -77,6 +77,7 @@ CREATE TABLE "Group" (
     "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
     "description" TEXT,
+    "level" "Level",
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "archived" BOOLEAN NOT NULL DEFAULT false,
