@@ -136,4 +136,49 @@ export class UserRepository {
       },
     });
   }
+
+  async searchStudentsByUsername(params: {
+    q: string;
+    take?: number;
+    excludeTeacherId?: number;
+  }) {
+    const { q, take = 15, excludeTeacherId } = params;
+
+    return this.prisma.user.findMany({
+      where: {
+        role: { name: 'student' },
+        username: {
+          startsWith: q,
+          mode: 'insensitive',
+        },
+        ...(excludeTeacherId
+          ? {
+              groupMemberships: {
+                none: {
+                  isActive: true,
+                  group: {
+                    members: {
+                      some: {
+                        userId: excludeTeacherId,
+                        isActive: true,
+                        role: { name: 'teacher' },
+                      },
+                    },
+                  },
+                },
+              },
+            }
+          : {}),
+      },
+      select: {
+        id: true,
+        username: true,
+        firstName: true,
+        lastName: true,
+        level: true,
+      },
+      take,
+      orderBy: { username: 'asc' },
+    });
+  }
 }

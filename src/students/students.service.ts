@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { GroupRepository } from 'repositories/group-repository';
 import { StudentDto } from './dto/student.dto';
+import { UserRepository } from 'repositories/user.repository';
 
 @Injectable()
 export class StudentsService {
-  constructor(private groupRepo: GroupRepository) {}
+  constructor(
+    private groupRepo: GroupRepository,
+    private userRepo: UserRepository,
+  ) {}
 
   async getStudents(teacherId: number): Promise<StudentDto[]> {
     const groups = await this.groupRepo.findByTeacher(teacherId);
@@ -29,6 +33,25 @@ export class StudentsService {
     }
 
     return Array.from(uniqueById.values());
+  }
+
+  async getAllStudents(teacherId: number, q: string): Promise<StudentDto[]> {
+    const query = (q ?? '').trim().replace(/^@+/, '');
+
+    if (query.length < 2) return [];
+
+    const users = await this.userRepo.searchStudentsByUsername({
+      q: query,
+      take: 15,
+      excludeTeacherId: teacherId,
+    });
+
+    return users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      level: u.level,
+      name: u.firstName || u.lastName || '',
+    }));
   }
 
   async getGroups(teacherId: number) {

@@ -1,9 +1,9 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, UseGuards, Query } from '@nestjs/common';
 import {
-  ApiCreatedResponse,
   ApiOperation,
   ApiTags,
   ApiBearerAuth,
+  ApiOkResponse,
 } from '@nestjs/swagger';
 import { StudentsService } from './students.service';
 import { CurrentUser } from 'auth/decorators/current-user.decorator';
@@ -21,12 +21,20 @@ export class StudentsController {
   @ApiOperation({
     summary: 'Get all students associated with the current teacher',
   })
-  @ApiCreatedResponse({
+  @ApiOkResponse({
     description: 'List of students with their Telegram names',
   })
   async getMyStudents(@CurrentUser() user: JwtPayload) {
     const teacherId = user.sub;
 
     return this.studentsService.getStudents(teacherId);
+  }
+
+  @Get('search')
+  @ApiOperation({ summary: 'Search students by username' })
+  @ApiOkResponse({ description: 'List of matching students' })
+  async searchStudents(@Query('q') q: string, @CurrentUser() user: JwtPayload) {
+    const teacherId = user.sub;
+    return this.studentsService.getAllStudents(teacherId, q);
   }
 }
