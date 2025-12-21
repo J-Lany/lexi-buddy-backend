@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, UseGuards, Query, Param } from '@nestjs/common';
 import {
   ApiOperation,
   ApiTags,
@@ -36,5 +36,18 @@ export class StudentsController {
   async searchStudents(@Query('q') q: string, @CurrentUser() user: JwtPayload) {
     const teacherId = user.sub;
     return this.studentsService.getAllStudents(teacherId, q);
+  }
+
+  @Get(':id/dashboard')
+  @ApiOperation({ summary: 'Get student dashboard (for current teacher)' })
+  @ApiOkResponse({ description: 'Student profile + lessons progress' })
+  async getStudentDashboard(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const teacherId = user.sub;
+    const studentId = Number(id);
+
+    return this.studentsService.getStudentDashboard(teacherId, studentId);
   }
 }

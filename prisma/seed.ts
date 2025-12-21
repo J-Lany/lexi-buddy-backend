@@ -8,27 +8,33 @@ async function getOrCreateRole(
   scope: RoleScope,
   description?: string,
 ) {
-  const existing = await prisma.role.findFirst({
-    where: { name, scope },
-  });
-
+  const existing = await prisma.role.findFirst({ where: { name, scope } });
   if (existing) return existing;
 
-  return prisma.role.create({
-    data: { name, scope, description },
-  });
+  return prisma.role.create({ data: { name, scope, description } });
 }
 
 async function getOrCreateContactType(name: string, displayName: string) {
-  const existing = await prisma.contactType.findUnique({
-    where: { name },
-  });
-
+  const existing = await prisma.contactType.findUnique({ where: { name } });
   if (existing) return existing;
 
-  return prisma.contactType.create({
-    data: { name, displayName },
+  return prisma.contactType.create({ data: { name, displayName } });
+}
+
+async function getOrCreateAssignmentType(name: string, description?: string) {
+  const existing = await prisma.assignmentType.findUnique({ where: { name } });
+  if (existing) return existing;
+
+  return prisma.assignmentType.create({ data: { name, description } });
+}
+
+async function getOrCreateQuestionType(name: string) {
+  const existing = await prisma.assignmentQuestionType.findUnique({
+    where: { name },
   });
+  if (existing) return existing;
+
+  return prisma.assignmentQuestionType.create({ data: { name } });
 }
 
 // --- CORE SEED (для всех окружений) ---
@@ -68,10 +74,7 @@ async function seedCore() {
 // helpers (dev seed)
 async function findUserByEmail(email: string, contactTypeId: number) {
   const existing = await prisma.userContact.findFirst({
-    where: {
-      contactValue: email,
-      contactTypeId,
-    },
+    where: { contactValue: email, contactTypeId },
     include: { user: true },
   });
 
@@ -90,9 +93,207 @@ async function ensureUniqueUsername(base: string | null | undefined) {
 
   if (!existing) return normalized;
 
-  // если занято — делаем уникальным
   const suffix = Math.floor(Math.random() * 1_000_000);
   return `${normalized}_${suffix}`;
+}
+
+/**
+ * Создаёт 1-2 тестовых урока в группе + немного прогресса для указанного студента.
+ * Идемпотентно: проверяет lesson по (groupId + title) и StudentAssignment по (userId + assignmentId) через findFirst.
+ */
+async function seedTestLessons(params: {
+  groupId: number;
+  createdById: number;
+  studentId: number;
+}) {
+  const { groupId, createdById, studentId } = params;
+
+  const typeQuiz = await getOrCreateAssignmentType(
+    'Definition Quiz',
+    'Выбор определения',
+  );
+  const typeGap = await getOrCreateAssignmentType(
+    'Gap Filling',
+    'Вставь пропущенное слово',
+  );
+
+  const qtMcq = await getOrCreateQuestionType('multiple_choice');
+  const qtGap = await getOrCreateQuestionType('gap_fill');
+
+  // ---------- LESSON 1 ----------
+  const lesson1Title = 'Lesson 1: Greetings';
+  let lesson1 = await prisma.lesson.findFirst({
+    where: { groupId, title: lesson1Title },
+    select: { id: true },
+  });
+
+  if (!lesson1) {
+    lesson1 = await prisma.lesson.create({
+      data: {
+        groupId,
+        createdById,
+        title: lesson1Title,
+        level: Level.A1,
+        topic: 'Greetings',
+        description: 'Тестовый урок для разработки (приветствия).',
+        vocab: {
+          create: [
+            { term: 'hello', translation: 'привет' },
+            { term: 'goodbye', translation: 'пока' },
+            { term: 'please', translation: 'пожалуйста' },
+          ],
+        },
+        assignments: {
+          create: [
+            {
+              typeId: typeQuiz.id,
+              questions: {
+                create: [
+                  {
+                    text: 'Choose the correct translation for "hello".',
+                    questionTypeId: qtMcq.id,
+                    answers: {
+                      create: [
+                        { text: 'привет', isCorrect: true },
+                        { text: 'пока', isCorrect: false },
+                        { text: 'спасибо', isCorrect: false },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              typeId: typeGap.id,
+              questions: {
+                create: [
+                  {
+                    text: 'Fill the gap: "____!" (a polite word)',
+                    questionTypeId: qtGap.id,
+                    answers: {
+                      create: [{ text: 'please', isCorrect: true }],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      select: { id: true },
+    });
+
+    console.log(`Created lesson: "${lesson1Title}"`);
+  } else {
+    console.log(`Lesson already exists: "${lesson1Title}"`);
+  }
+
+  const lesson1Assignments = await prisma.assignment.findMany({
+    where: { lessonId: lesson1.id },
+    select: { id: true },
+    orderBy: { id: 'asc' },
+  });
+
+  // ---------- LESSON 2 ----------
+  const lesson2Title = 'Lesson 2: Family';
+  let lesson2 = await prisma.lesson.findFirst({
+    where: { groupId, title: lesson2Title },
+    select: { id: true },
+  });
+
+  if (!lesson2) {
+    lesson2 = await prisma.lesson.create({
+      data: {
+        groupId,
+        createdById,
+        title: lesson2Title,
+        level: Level.A1,
+        topic: 'Family',
+        description: 'Тестовый урок (семья).',
+        vocab: {
+          create: [
+            { term: 'mother', translation: 'мама' },
+            { term: 'father', translation: 'папа' },
+            { term: 'sister', translation: 'сестра' },
+          ],
+        },
+        assignments: {
+          create: [
+            {
+              typeId: typeQuiz.id,
+              questions: {
+                create: [
+                  {
+                    text: 'Choose the correct translation for "mother".',
+                    questionTypeId: qtMcq.id,
+                    answers: {
+                      create: [
+                        { text: 'мама', isCorrect: true },
+                        { text: 'папа', isCorrect: false },
+                        { text: 'брат', isCorrect: false },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      select: { id: true },
+    });
+
+    console.log(`Created lesson: "${lesson2Title}"`);
+  } else {
+    console.log(`Lesson already exists: "${lesson2Title}"`);
+  }
+
+  // ---------- Student progress seed ----------
+  async function ensureStudentAssignment(p: {
+    assignmentId: number;
+    status: 'PENDING' | 'COMPLETED' | 'GRADED';
+    score?: number | null;
+    submittedAt?: Date | null;
+    gradedAt?: Date | null;
+  }) {
+    const existing = await prisma.studentAssignment.findFirst({
+      where: { userId: studentId, assignmentId: p.assignmentId },
+      select: { id: true },
+    });
+
+    if (existing) return;
+
+    await prisma.studentAssignment.create({
+      data: {
+        userId: studentId,
+        assignmentId: p.assignmentId,
+        status: p.status,
+        score: p.score ?? null,
+        submittedAt: p.submittedAt ?? null,
+        gradedAt: p.gradedAt ?? null,
+      },
+    });
+  }
+
+  // Пример: в lesson1 студент сделал 1 из 2
+  if (lesson1Assignments[0]) {
+    await ensureStudentAssignment({
+      assignmentId: lesson1Assignments[0].id,
+      status: 'GRADED',
+      score: 1,
+      submittedAt: new Date(Date.now() - 1000 * 60 * 60 * 24), // вчера
+      gradedAt: new Date(Date.now() - 1000 * 60 * 60 * 23), // чуть позже
+    });
+  }
+
+  if (lesson1Assignments[1]) {
+    await ensureStudentAssignment({
+      assignmentId: lesson1Assignments[1].id,
+      status: 'PENDING',
+    });
+  }
+
+  console.log('Seeded test lessons + student progress');
 }
 
 // --- DEV/STAGING SEED (тестовые юзеры и группа) ---
@@ -103,7 +304,6 @@ async function seedDevData() {
   const hashedPassword = await argon2.hash(teacherPassword);
   const teacherEmail = 'anna.ivanovna@example.com';
 
-  // test telegram data (цифровые id + username)
   const student1TelegramId = 111111111;
   const student1TelegramUsername = 'petka';
 
@@ -144,7 +344,6 @@ async function seedDevData() {
   if (teacherUser) {
     console.log(`Teacher already exists with email ${teacherEmail}`);
   } else {
-    // username может конфликтовать, поэтому для учителя не задаём или делаем уникальным
     teacherUser = await prisma.user.create({
       data: {
         firstName: 'Анна',
@@ -170,11 +369,12 @@ async function seedDevData() {
     );
   }
 
+  if (!teacherUser) throw new Error('Teacher not found/created');
+
   // -----------------------
   // STUDENT 1
   // -----------------------
   const student1Email = 'petr_petrov@example.com';
-
   let student1 = await findUserByEmail(student1Email, contactTypeEmailId);
 
   if (student1) {
@@ -184,7 +384,7 @@ async function seedDevData() {
 
     student1 = await prisma.user.create({
       data: {
-        username, // TG username (handle) — хранится в User.username
+        username,
         firstName: 'Пётр',
         lastName: 'Петров',
         roleId: globalStudentRole.id,
@@ -200,7 +400,6 @@ async function seedDevData() {
               verified: true,
             },
             {
-              // ВАЖНО: telegramId — цифры, но в БД строкой
               contactValue: String(student1TelegramId),
               contactTypeId: contactTypeTelegramId,
               isPrimary: false,
@@ -216,11 +415,12 @@ async function seedDevData() {
     );
   }
 
+  if (!student1) throw new Error('Student1 not found/created');
+
   // -----------------------
   // STUDENT 2
   // -----------------------
   const student2Email = 'maria_sidorova@example.com';
-
   let student2 = await findUserByEmail(student2Email, contactTypeEmailId);
 
   if (student2) {
@@ -261,6 +461,8 @@ async function seedDevData() {
     );
   }
 
+  if (!student2) throw new Error('Student2 not found/created');
+
   // -----------------------
   // GROUP (teacher + 2 students)
   // -----------------------
@@ -276,12 +478,12 @@ async function seedDevData() {
   }
 
   const groupName = 'Группа А1 (Продвинутый)';
-
-  const group = await prisma.group.findFirst({
+  const existingGroup = await prisma.group.findFirst({
     where: { name: groupName },
+    select: { id: true },
   });
 
-  if (!group) {
+  if (!existingGroup) {
     await prisma.group.create({
       data: {
         name: groupName,
@@ -312,6 +514,21 @@ async function seedDevData() {
   } else {
     console.log(`Group "${groupName}" already exists`);
   }
+
+  const actualGroup = await prisma.group.findFirst({
+    where: { name: groupName },
+    select: { id: true },
+  });
+  if (!actualGroup) throw new Error('Group not found after creation');
+
+  // -----------------------
+  // TEST LESSONS + PROGRESS (for student1)
+  // -----------------------
+  await seedTestLessons({
+    groupId: actualGroup.id,
+    createdById: teacherUser.id,
+    studentId: student1.id,
+  });
 }
 
 async function main() {
