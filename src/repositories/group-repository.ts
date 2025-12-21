@@ -183,4 +183,32 @@ export class GroupRepository {
       },
     });
   }
+
+  async teacherHasStudent(teacherId: number, studentId: number) {
+    const group = await this.prisma.group.findFirst({
+      where: {
+        members: {
+          some: {
+            userId: teacherId,
+            isActive: true,
+            role: { name: 'teacher' },
+          },
+        },
+        AND: [
+          {
+            members: {
+              some: {
+                userId: studentId,
+                isActive: true,
+                role: { name: 'student' },
+              },
+            },
+          },
+        ],
+      },
+      select: { id: true },
+    });
+
+    return !!group;
+  }
 }

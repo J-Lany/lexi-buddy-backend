@@ -6,11 +6,17 @@ import { GroupRepository } from 'repositories/group-repository';
 import { StudentsService } from './students.service';
 import { StudentsController } from './students.controller';
 import { UserRepository } from 'repositories/user.repository';
+import { StudentsRepository } from 'repositories/student-repository';
 
 @Module({
   imports: [AuthModule, PrismaModule],
   controllers: [StudentsController],
-  providers: [StudentsService, GroupRepository, UserRepository],
+  providers: [
+    StudentsService,
+    GroupRepository,
+    UserRepository,
+    StudentsRepository,
+  ],
   exports: [StudentsService],
 })
 export class StudentsModule {}
