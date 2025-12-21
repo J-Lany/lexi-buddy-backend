@@ -7,8 +7,8 @@ import {
 import { GroupRepository } from 'repositories/group-repository';
 import { RoleRepository } from 'repositories/role.repository';
 import { CreateGroupDto } from './dto/create-group.dto';
-import { round1 } from 'students/utils/round';
-import { DONE_STATUSES } from 'students/utils/contst';
+import { round1 } from 'common/utils/round';
+import { DONE_STATUSES } from 'common/constants/student-assignment';
 
 @Injectable()
 export class GroupsService {
