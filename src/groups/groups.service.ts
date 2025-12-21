@@ -2,10 +2,13 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { GroupRepository } from 'repositories/group-repository';
 import { RoleRepository } from 'repositories/role.repository';
 import { CreateGroupDto } from './dto/create-group.dto';
+import { round1 } from 'common/utils/round';
+import { DONE_STATUSES } from 'common/constants/student-assignment';
 
 @Injectable()
 export class GroupsService {
@@ -143,6 +146,98 @@ export class GroupsService {
         name: member.user.firstName || member.user.lastName || '',
         level: member.user.level,
       },
+    };
+  }
+  async getGroupDashboard(teacherId: number, groupId: number) {
+    const canSee = await this.groupRepo.findGroupForTeacher(teacherId, groupId);
+    if (!canSee) throw new ForbiddenException('No access to this group');
+
+    const raw = await this.groupRepo.getGroupDashboardRaw(groupId);
+
+    if (!raw.group) throw new NotFoundException('Group not found');
+
+    const studentsTotal = raw.students.length;
+
+    const assignmentToLessonId = new Map<number, number>();
+    const totalAssignmentsByLesson = new Map<number, number>();
+
+    for (const lesson of raw.lessons) {
+      totalAssignmentsByLesson.set(lesson.id, lesson.assignments.length);
+      for (const a of lesson.assignments) {
+        assignmentToLessonId.set(a.id, lesson.id);
+      }
+    }
+
+    const doneCountByLessonStudent = new Map<string, number>();
+
+    for (const sa of raw.studentAssignments) {
+      if (!DONE_STATUSES.includes(sa.status)) continue;
+
+      const lessonId = assignmentToLessonId.get(sa.assignmentId);
+      if (!lessonId) continue;
+
+      const key = `${lessonId}:${sa.userId}`;
+      doneCountByLessonStudent.set(
+        key,
+        (doneCountByLessonStudent.get(key) ?? 0) + 1,
+      );
+    }
+
+    const lessonsDto = raw.lessons.map((lesson) => {
+      const assignmentsTotal = totalAssignmentsByLesson.get(lesson.id) ?? 0;
+
+      let studentsStarted = 0;
+      let studentsDone = 0;
+
+      for (const s of raw.students) {
+        const key = `${lesson.id}:${s.id}`;
+        const doneCount = doneCountByLessonStudent.get(key) ?? 0;
+
+        if (doneCount > 0) studentsStarted += 1;
+        if (assignmentsTotal > 0 && doneCount >= assignmentsTotal)
+          studentsDone += 1;
+      }
+
+      const percentDone =
+        studentsTotal > 0 ? round1((studentsDone / studentsTotal) * 100) : 0;
+
+      return {
+        id: lesson.id,
+        groupId: lesson.groupId,
+        title: lesson.title,
+        topic: lesson.topic,
+        level: lesson.level,
+        createdAt: lesson.createdAt,
+        assignmentsTotal,
+        progress: {
+          studentsTotal,
+          studentsStarted,
+          studentsDone,
+          percentDone,
+        },
+      };
+    });
+
+    const studentsDto = raw.students.map((u) => ({
+      id: u.id,
+      name: u.firstName || u.lastName || '',
+      username: u.username,
+      level: u.level,
+      telegramValue:
+        u.contacts.find((c) => c.contactType.name === 'telegram')
+          ?.contactValue ?? null,
+    }));
+
+    return {
+      group: {
+        id: raw.group.id,
+        name: raw.group.name,
+        description: raw.group.description,
+        level: raw.group.level,
+        studentsCount: studentsTotal,
+      },
+      students: studentsDto,
+      lessons: lessonsDto,
     };
   }
 }

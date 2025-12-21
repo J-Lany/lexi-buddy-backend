@@ -107,4 +107,21 @@ export class GroupsController {
 
     return this.groupsService.addStudentToGroup(teacherId, groupId, studentId);
   }
+
+  @Get(':id/dashboard')
+  @ApiOperation({
+    summary: 'Get group dashboard (overview) for current teacher',
+  })
+  @ApiOkResponse({
+    description: 'Group base info + students + lessons aggregated progress',
+  })
+  async getGroupDashboard(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const teacherId = user.sub;
+    const groupId = Number(id);
+
+    return this.groupsService.getGroupDashboard(teacherId, groupId);
+  }
 }

@@ -211,4 +211,90 @@ export class GroupRepository {
 
     return !!group;
   }
+
+  async getGroupDashboardRaw(groupId: number) {
+    const group = await this.prisma.group.findUnique({
+      where: { id: groupId },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        level: true,
+      },
+    });
+
+    if (!group) {
+      return { group: null, students: [], lessons: [], studentAssignments: [] };
+    }
+
+    const students = await this.prisma.groupMember.findMany({
+      where: {
+        groupId,
+        isActive: true,
+        removedAt: null,
+        role: { name: 'student' },
+      },
+      select: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true,
+            level: true,
+            contacts: {
+              select: {
+                contactValue: true,
+                contactType: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { joinedAt: 'asc' },
+    });
+
+    const studentUsers = students.map((m) => m.user);
+    const studentIds = studentUsers.map((u) => u.id);
+
+    const lessons = await this.prisma.lesson.findMany({
+      where: { groupId, archived: false },
+      select: {
+        id: true,
+        groupId: true,
+        title: true,
+        topic: true,
+        level: true,
+        createdAt: true,
+        assignments: { select: { id: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const assignmentIds = lessons.flatMap((l) =>
+      l.assignments.map((a) => a.id),
+    );
+
+    const studentAssignments =
+      studentIds.length && assignmentIds.length
+        ? await this.prisma.studentAssignment.findMany({
+            where: {
+              userId: { in: studentIds },
+              assignmentId: { in: assignmentIds },
+            },
+            select: {
+              userId: true,
+              assignmentId: true,
+              status: true,
+            },
+          })
+        : [];
+
+    return {
+      group,
+      students: studentUsers,
+      lessons,
+      studentAssignments,
+    };
+  }
 }

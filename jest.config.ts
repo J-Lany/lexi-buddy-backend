@@ -9,6 +9,7 @@ const config: Config = {
     '^repositories/(.*)$': '<rootDir>/src/repositories/$1',
     '^prisma/(.*)$': '<rootDir>/src/prisma/$1',
     '^notifications/(.*)$': '<rootDir>/src/notifications/$1',
+    '^common/(.*)$': '<rootDir>/src/common/$1',
   },
   testRegex: '.*\\.spec\\.ts$',
   moduleFileExtensions: ['ts', 'js', 'json'],
