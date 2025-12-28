@@ -25,7 +25,7 @@ export class AssignmentPreviewDto {
   @ApiProperty()
   @IsInt()
   @Min(1)
-  @Max(10)
+  @Max(15)
   questionsCount!: number;
 
   @ApiProperty()
