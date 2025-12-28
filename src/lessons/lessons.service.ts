@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -25,6 +26,18 @@ export class LessonsService {
     private readonly ai: AiService,
   ) {}
 
+  /** Берём id типа задания по имени или кидаем 400 */
+  private async getAssignmentTypeIdOrThrow(typeName: string): Promise<number> {
+    const assignmentType =
+      await this.assignmentRepo.findAssignmentTypeByName(typeName);
+
+    if (!assignmentType) {
+      throw new BadRequestException(`Assignment type "${typeName}" not found`);
+    }
+
+    return assignmentType.id;
+  }
+
   async createLesson(dto: CreateLessonDto, teacherId: number) {
     const lesson = await this.lessonRepo.createLesson({
       title: dto.title,
@@ -47,16 +60,15 @@ export class LessonsService {
     }
 
     if (dto.assignments?.length) {
-      const questionTypes = await this.prisma.assignmentQuestionType.findMany();
-      const typeByName = Object.fromEntries(
-        questionTypes.map((t) => [t.name, t.id]),
-      );
+      // берём мапу типов вопросов из репозитория, а не из Prisma напрямую
+      const questionTypeMap = await this.assignmentRepo.getQuestionTypeMap();
 
       for (const assignmentDto of dto.assignments) {
         const questions = assignmentDto.questions.map((q) => ({
           text: q.text,
           questionTypeId:
-            typeByName[q.questionType] ?? typeByName['multiple_choice'],
+            questionTypeMap[q.questionType] ??
+            questionTypeMap['multiple_choice'],
           answers: q.answers.map((a) => ({
             text: a.text,
             isCorrect: a.isCorrect,
@@ -64,9 +76,13 @@ export class LessonsService {
           explanation: q.explanation,
         }));
 
+        const typeId = await this.getAssignmentTypeIdOrThrow(
+          assignmentDto.type,
+        );
+
         await this.assignmentRepo.createAssignmentWithQuestionsAndAnswers({
           lessonId: lesson.id,
-          typeId: assignmentDto.assignmentTypeId,
+          typeId,
           questions,
         });
       }
@@ -139,15 +155,12 @@ export class LessonsService {
 
     this.ensureLessonOwner(lesson.createdById, teacherId);
 
-    const questionTypes = await this.prisma.assignmentQuestionType.findMany();
-    const typeByName = Object.fromEntries(
-      questionTypes.map((t) => [t.name, t.id]),
-    );
+    const questionTypeMap = await this.assignmentRepo.getQuestionTypeMap();
 
     const questions = dto.questions.map((q) => ({
       text: q.text,
       questionTypeId:
-        typeByName[q.questionType] ?? typeByName['multiple_choice'],
+        questionTypeMap[q.questionType] ?? questionTypeMap['multiple_choice'],
       answers: q.answers.map((a) => ({
         text: a.text,
         isCorrect: a.isCorrect,
@@ -155,9 +168,11 @@ export class LessonsService {
       explanation: q.explanation,
     }));
 
+    const typeId = await this.getAssignmentTypeIdOrThrow(dto.type);
+
     return this.assignmentRepo.createAssignmentWithQuestionsAndAnswers({
       lessonId,
-      typeId: dto.assignmentTypeId,
+      typeId,
       questions,
     });
   }

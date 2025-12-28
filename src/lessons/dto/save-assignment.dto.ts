@@ -56,10 +56,6 @@ export class SaveAssignmentDto {
   type!: FrontAssignmentType;
 
   @ApiProperty()
-  @IsInt()
-  assignmentTypeId!: number;
-
-  @ApiProperty()
   @IsArray()
   @ArrayNotEmpty()
   questions!: SaveAssignmentQuestionDto[];

@@ -42,4 +42,16 @@ export class AssignmentRepository {
       },
     });
   }
+
+  /** AssignmentType по name (строка-ключ, которую ты передаёшь с фронта) */
+  async findAssignmentTypeByName(name: string) {
+    return this.prisma.assignmentType.findUnique({
+      where: { name },
+    });
+  }
+
+  async getQuestionTypeMap(): Promise<Record<string, number>> {
+    const types = await this.prisma.assignmentQuestionType.findMany();
+    return Object.fromEntries(types.map((t) => [t.name, t.id]));
+  }
 }

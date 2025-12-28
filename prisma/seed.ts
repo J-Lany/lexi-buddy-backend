@@ -68,6 +68,17 @@ async function seedCore() {
   await getOrCreateContactType('email', 'Email');
   await getOrCreateContactType('telegram', 'Telegram ID');
 
+  // типы заданий — name = snake_case ключ, description = человекочитаемое имя
+  await getOrCreateAssignmentType('definition_quiz', 'Definition Quiz');
+  await getOrCreateAssignmentType('gap_filling', 'Gap Filling');
+  await getOrCreateAssignmentType('phrase_fail', 'Phrase Fail');
+  await getOrCreateAssignmentType('collocation_check', 'Collocation Check');
+
+  // типы вопросов
+  await getOrCreateQuestionType('multiple_choice');
+  await getOrCreateQuestionType('gap_fill');
+  await getOrCreateQuestionType('open_text');
+
   console.log('Core data seeded');
 }
 
@@ -110,12 +121,13 @@ async function seedTestLessons(params: {
 }) {
   const { groupId, createdById, studentId } = params;
 
+  // ВАЖНО: используем те же snake_case ключи, что и в seedCore
   const typeQuiz = await getOrCreateAssignmentType(
-    'Definition Quiz',
+    'definition_quiz',
     'Выбор определения',
   );
   const typeGap = await getOrCreateAssignmentType(
-    'Gap Filling',
+    'gap_filling',
     'Вставь пропущенное слово',
   );
 
