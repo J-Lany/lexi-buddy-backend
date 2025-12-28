@@ -117,7 +117,6 @@ CREATE TABLE "GroupInvite" (
 -- CreateTable
 CREATE TABLE "Lesson" (
     "id" SERIAL NOT NULL,
-    "groupId" INTEGER NOT NULL,
     "createdById" INTEGER NOT NULL,
     "title" TEXT NOT NULL,
     "level" "Level",
@@ -129,6 +128,16 @@ CREATE TABLE "Lesson" (
     "archived" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "Lesson_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "GroupLesson" (
+    "id" SERIAL NOT NULL,
+    "groupId" INTEGER NOT NULL,
+    "lessonId" INTEGER NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "GroupLesson_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -251,6 +260,9 @@ CREATE UNIQUE INDEX "GroupMember_groupId_userId_key" ON "GroupMember"("groupId",
 CREATE UNIQUE INDEX "GroupInvite_groupId_inviteeId_status_key" ON "GroupInvite"("groupId", "inviteeId", "status");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "GroupLesson_groupId_lessonId_key" ON "GroupLesson"("groupId", "lessonId");
+
+-- CreateIndex
 CREATE INDEX "LessonVocab_lessonId_idx" ON "LessonVocab"("lessonId");
 
 -- CreateIndex
@@ -302,10 +314,13 @@ ALTER TABLE "GroupInvite" ADD CONSTRAINT "GroupInvite_inviterId_fkey" FOREIGN KE
 ALTER TABLE "GroupInvite" ADD CONSTRAINT "GroupInvite_inviteeId_fkey" FOREIGN KEY ("inviteeId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Lesson" ADD CONSTRAINT "Lesson_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "Group"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Lesson" ADD CONSTRAINT "Lesson_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Lesson" ADD CONSTRAINT "Lesson_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "GroupLesson" ADD CONSTRAINT "GroupLesson_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "Group"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "GroupLesson" ADD CONSTRAINT "GroupLesson_lessonId_fkey" FOREIGN KEY ("lessonId") REFERENCES "Lesson"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "LessonVocab" ADD CONSTRAINT "LessonVocab_lessonId_fkey" FOREIGN KEY ("lessonId") REFERENCES "Lesson"("id") ON DELETE CASCADE ON UPDATE CASCADE;

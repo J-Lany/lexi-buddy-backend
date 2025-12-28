@@ -147,8 +147,8 @@ model Group {
   archived    Boolean  @default(false)
 
   members GroupMember[]
-  lessons Lesson[]
   invites GroupInvite[]
+  groupLessons GroupLesson[]
 }
 
 model GroupMember {
@@ -192,7 +192,6 @@ model GroupInvite {
 
 model Lesson {
   id          Int       @id @default(autoincrement())
-  groupId     Int
   createdById Int
   title       String
   level       Level?
@@ -203,11 +202,24 @@ model Lesson {
   updatedAt   DateTime  @updatedAt
   archived    Boolean   @default(false)
 
-  group     Group @relation(fields: [groupId], references: [id])
-  createdBy User  @relation("LessonCreator", fields: [createdById], references: [id])
+  createdBy User @relation("LessonCreator", fields: [createdById], references: [id])
 
-  vocab       LessonVocab[]
-  assignments Assignment[]
+  vocab        LessonVocab[]
+  assignments  Assignment[]
+  groupLessons GroupLesson[]
+}
+
+model GroupLesson {
+  id       Int  @id @default(autoincrement())
+  groupId  Int
+  lessonId Int
+
+  createdAt DateTime @default(now())
+
+  group  Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, lessonId])
 }
 
 model LessonVocab {
@@ -215,7 +227,7 @@ model LessonVocab {
   lessonId    Int
   term        String
   translation String?
-  synonyms    Json? // JSONB в Postgres
+  synonyms    Json? 
   createdAt   DateTime @default(now())
 
   lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
@@ -266,6 +278,7 @@ model AssignmentQuestion {
 
   assignment   Assignment             @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
   questionType AssignmentQuestionType @relation(fields: [questionTypeId], references: [id])
+  explanation    String? 
 
   answers AssignmentAnswer[]
   results Result[]
