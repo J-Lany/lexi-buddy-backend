@@ -148,6 +148,7 @@ export class GroupsService {
       },
     };
   }
+
   async getGroupDashboard(teacherId: number, groupId: number) {
     const canSee = await this.groupRepo.findGroupForTeacher(teacherId, groupId);
     if (!canSee) throw new ForbiddenException('No access to this group');
@@ -161,9 +162,16 @@ export class GroupsService {
     const assignmentToLessonId = new Map<number, number>();
     const totalAssignmentsByLesson = new Map<number, number>();
 
-    for (const lesson of raw.lessons) {
-      totalAssignmentsByLesson.set(lesson.id, lesson.assignments.length);
-      for (const a of lesson.assignments) {
+    const lessons = raw.lessons as Array<
+      (typeof raw.lessons)[number] & {
+        assignments: { id: number }[];
+      }
+    >;
+
+    for (const lesson of lessons) {
+      totalAssignmentsByLesson.set(lesson.id, lesson.assignments?.length ?? 0);
+
+      for (const a of lesson.assignments ?? []) {
         assignmentToLessonId.set(a.id, lesson.id);
       }
     }
@@ -183,7 +191,7 @@ export class GroupsService {
       );
     }
 
-    const lessonsDto = raw.lessons.map((lesson) => {
+    const lessonsDto = lessons.map((lesson) => {
       const assignmentsTotal = totalAssignmentsByLesson.get(lesson.id) ?? 0;
 
       let studentsStarted = 0;
@@ -203,7 +211,7 @@ export class GroupsService {
 
       return {
         id: lesson.id,
-        groupId: lesson.groupId,
+        groupId,
         title: lesson.title,
         topic: lesson.topic,
         level: lesson.level,

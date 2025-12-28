@@ -115,3 +115,8 @@ npx prisma migrate dev -n "add_group_flow"
 
 npx prisma studio - команда открывает в браузере UI БД, и позволяет добавить нужные данные
 npx prisma db seed - создает тестовые данные
+
+Если после обновления схемы хочется стереть все данные и накатить новую БД, без истории миграций:
+rm -rf prisma/migrations
+npx prisma migrate reset
+npx prisma migrate dev --name init

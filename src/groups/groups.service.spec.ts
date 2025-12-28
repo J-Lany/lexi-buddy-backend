@@ -4,6 +4,7 @@ import { GroupsService } from './groups.service';
 import { GroupRepository } from 'repositories/group-repository';
 import { RoleRepository } from 'repositories/role.repository';
 import { NotFoundException } from '@nestjs/common';
+import { CreateGroupDto } from './dto/create-group.dto';
 
 describe('GroupsService (unit, manual DI)', () => {
   let service: GroupsService;
@@ -135,7 +136,12 @@ describe('GroupsService (unit, manual DI)', () => {
   // -------------------------------------------------------------------
 
   describe('createGroup', () => {
-    const dto = { name: 'New group', description: 'desc', studentIds: [1, 2] };
+    const dto = {
+      name: 'New group',
+      description: 'desc',
+      studentIds: [1, 2],
+      level: 'A1',
+    } as CreateGroupDto;
 
     it('should throw if group roles are not configured', async () => {
       roleRepo.findGroupRole

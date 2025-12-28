@@ -94,14 +94,18 @@ export class StudentsService {
 
     if (!data.student) throw new NotFoundException('Student not found');
 
-    const lessons = data.lessons;
+    const lessons = data.lessons as Array<
+      (typeof data.lessons)[number] & {
+        assignments: { id: number }[];
+      }
+    >;
 
     const assignmentToLessonId = new Map<number, number>();
     const totalByLesson = new Map<number, number>();
 
     for (const l of lessons) {
-      totalByLesson.set(l.id, l.assignments.length);
-      for (const a of l.assignments) {
+      totalByLesson.set(l.id, l.assignments?.length ?? 0);
+      for (const a of l.assignments ?? []) {
         assignmentToLessonId.set(a.id, l.id);
       }
     }
@@ -172,7 +176,7 @@ export class StudentsService {
 
       return {
         id: l.id,
-        groupId: l.groupId,
+        groupId: null,
         title: l.title,
         level: l.level,
         topic: l.topic,
@@ -195,7 +199,6 @@ export class StudentsService {
 
     const avgScoreAll = scoreCountAll > 0 ? scoreSumAll / scoreCountAll : null;
 
-    // 6) финальный ответ
     return {
       student: {
         id: data.student.id,

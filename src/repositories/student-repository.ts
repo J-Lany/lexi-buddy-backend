@@ -60,12 +60,16 @@ export class StudentsRepository {
     const lessons = groupIds.length
       ? await this.prisma.lesson.findMany({
           where: {
-            groupId: { in: groupIds },
             archived: false,
+
+            groupLessons: {
+              some: {
+                groupId: { in: groupIds },
+              },
+            },
           },
           select: {
             id: true,
-            groupId: true,
             title: true,
             level: true,
             topic: true,

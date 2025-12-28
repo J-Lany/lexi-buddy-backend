@@ -68,6 +68,17 @@ async function seedCore() {
   await getOrCreateContactType('email', 'Email');
   await getOrCreateContactType('telegram', 'Telegram ID');
 
+  // типы заданий — name = snake_case ключ, description = человекочитаемое имя
+  await getOrCreateAssignmentType('definition_quiz', 'Definition Quiz');
+  await getOrCreateAssignmentType('gap_filling', 'Gap Filling');
+  await getOrCreateAssignmentType('phrase_fail', 'Phrase Fail');
+  await getOrCreateAssignmentType('collocation_check', 'Collocation Check');
+
+  // типы вопросов
+  await getOrCreateQuestionType('multiple_choice');
+  await getOrCreateQuestionType('gap_fill');
+  await getOrCreateQuestionType('open_text');
+
   console.log('Core data seeded');
 }
 
@@ -99,7 +110,9 @@ async function ensureUniqueUsername(base: string | null | undefined) {
 
 /**
  * Создаёт 1-2 тестовых урока в группе + немного прогресса для указанного студента.
- * Идемпотентно: проверяет lesson по (groupId + title) и StudentAssignment по (userId + assignmentId) через findFirst.
+ * АДАПТИРОВАНО под новую схему:
+ * - Lesson больше НЕ содержит groupId
+ * - связь с группой через GroupLesson
  */
 async function seedTestLessons(params: {
   groupId: number;
@@ -108,12 +121,13 @@ async function seedTestLessons(params: {
 }) {
   const { groupId, createdById, studentId } = params;
 
+  // ВАЖНО: используем те же snake_case ключи, что и в seedCore
   const typeQuiz = await getOrCreateAssignmentType(
-    'Definition Quiz',
+    'definition_quiz',
     'Выбор определения',
   );
   const typeGap = await getOrCreateAssignmentType(
-    'Gap Filling',
+    'gap_filling',
     'Вставь пропущенное слово',
   );
 
@@ -122,15 +136,24 @@ async function seedTestLessons(params: {
 
   // ---------- LESSON 1 ----------
   const lesson1Title = 'Lesson 1: Greetings';
+
+  // ищем урок, который уже привязан к этой группе через GroupLesson
   let lesson1 = await prisma.lesson.findFirst({
-    where: { groupId, title: lesson1Title },
+    where: {
+      title: lesson1Title,
+      groupLessons: {
+        some: {
+          groupId,
+        },
+      },
+    },
     select: { id: true },
   });
 
   if (!lesson1) {
+    // создаём урок БЕЗ groupId
     lesson1 = await prisma.lesson.create({
       data: {
-        groupId,
         createdById,
         title: lesson1Title,
         level: Level.A1,
@@ -183,9 +206,17 @@ async function seedTestLessons(params: {
       select: { id: true },
     });
 
-    console.log(`Created lesson: "${lesson1Title}"`);
+    // привязываем урок к группе через GroupLesson
+    await prisma.groupLesson.create({
+      data: {
+        groupId,
+        lessonId: lesson1.id,
+      },
+    });
+
+    console.log(`Created lesson: "${lesson1Title}" and linked to group`);
   } else {
-    console.log(`Lesson already exists: "${lesson1Title}"`);
+    console.log(`Lesson already exists for this group: "${lesson1Title}"`);
   }
 
   const lesson1Assignments = await prisma.assignment.findMany({
@@ -196,15 +227,22 @@ async function seedTestLessons(params: {
 
   // ---------- LESSON 2 ----------
   const lesson2Title = 'Lesson 2: Family';
+
   let lesson2 = await prisma.lesson.findFirst({
-    where: { groupId, title: lesson2Title },
+    where: {
+      title: lesson2Title,
+      groupLessons: {
+        some: {
+          groupId,
+        },
+      },
+    },
     select: { id: true },
   });
 
   if (!lesson2) {
     lesson2 = await prisma.lesson.create({
       data: {
-        groupId,
         createdById,
         title: lesson2Title,
         level: Level.A1,
@@ -243,9 +281,16 @@ async function seedTestLessons(params: {
       select: { id: true },
     });
 
-    console.log(`Created lesson: "${lesson2Title}"`);
+    await prisma.groupLesson.create({
+      data: {
+        groupId,
+        lessonId: lesson2.id,
+      },
+    });
+
+    console.log(`Created lesson: "${lesson2Title}" and linked to group`);
   } else {
-    console.log(`Lesson already exists: "${lesson2Title}"`);
+    console.log(`Lesson already exists for this group: "${lesson2Title}"`);
   }
 
   // ---------- Student progress seed ----------

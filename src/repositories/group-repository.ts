@@ -258,15 +258,23 @@ export class GroupRepository {
     const studentIds = studentUsers.map((u) => u.id);
 
     const lessons = await this.prisma.lesson.findMany({
-      where: { groupId, archived: false },
+      where: {
+        archived: false,
+        groupLessons: {
+          some: { groupId },
+        },
+      },
       select: {
         id: true,
-        groupId: true,
         title: true,
         topic: true,
         level: true,
         createdAt: true,
-        assignments: { select: { id: true } },
+        assignments: {
+          select: {
+            id: true,
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
