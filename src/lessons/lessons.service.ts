@@ -16,6 +16,9 @@ import { AssignmentPreviewDto } from './dto/assignment-preview.dto';
 import { SaveAssignmentDto } from './dto/save-assignment.dto';
 import { AssignLessonDto } from './dto/assign-lesson.dto';
 import { TrainingTypeKey } from 'ai/prompts';
+import { LessonSummaryDto } from './dto/lesson-summary.dto';
+import { LessonDetailsDto } from './dto/lesson-details.dto';
+import { StudentAssignmentStatus } from '@prisma/client';
 
 @Injectable()
 export class LessonsService {
@@ -26,7 +29,6 @@ export class LessonsService {
     private readonly ai: AiService,
   ) {}
 
-  /** Берём id типа задания по имени или кидаем 400 */
   private async getAssignmentTypeIdOrThrow(typeName: string): Promise<number> {
     const assignmentType =
       await this.assignmentRepo.findAssignmentTypeByName(typeName);
@@ -60,7 +62,6 @@ export class LessonsService {
     }
 
     if (dto.assignments?.length) {
-      // берём мапу типов вопросов из репозитория, а не из Prisma напрямую
       const questionTypeMap = await this.assignmentRepo.getQuestionTypeMap();
 
       for (const assignmentDto of dto.assignments) {
@@ -97,13 +98,132 @@ export class LessonsService {
     }
   }
 
-  async getLessonForTeacher(lessonId: number, teacherId: number) {
+  async getLessonForTeacher(
+    lessonId: number,
+    teacherId: number,
+  ): Promise<LessonDetailsDto> {
     const lesson = await this.lessonRepo.findById(lessonId);
     if (!lesson) throw new NotFoundException('Lesson not found');
 
     this.ensureLessonOwner(lesson.createdById, teacherId);
 
-    return lesson;
+    const totalAssignments = lesson.assignments.length;
+
+    const groups = lesson.groupLessons
+      .filter((gl) => gl.group.members.length > 1)
+      .map((gl) => ({
+        id: gl.group.id,
+        name: gl.group.name,
+      }));
+
+    type LessonStudentStatus = 'NOT_STARTED' | 'PENDING' | 'COMPLETED';
+
+    const studentsMap = new Map<
+      number,
+      {
+        id: number;
+        username: string | null;
+        completedAssignments: number;
+      }
+    >();
+
+    for (const assignment of lesson.assignments) {
+      for (const sa of assignment.studentAssignments) {
+        if (!sa.user) continue;
+
+        const existing = studentsMap.get(sa.user.id) ?? {
+          id: sa.user.id,
+          username: sa.user.username,
+          completedAssignments: 0,
+        };
+
+        if (
+          sa.status === StudentAssignmentStatus.COMPLETED ||
+          sa.status === StudentAssignmentStatus.GRADED
+        ) {
+          existing.completedAssignments += 1;
+        }
+
+        studentsMap.set(sa.user.id, existing);
+      }
+    }
+
+    const students = Array.from(studentsMap.values()).map((s) => {
+      const completed = s.completedAssignments;
+      const total = totalAssignments || 0;
+
+      let status: LessonStudentStatus = 'NOT_STARTED';
+
+      if (total === 0) {
+        status = 'NOT_STARTED';
+      } else if (completed === 0) {
+        status = 'NOT_STARTED';
+      } else if (completed < total) {
+        status = 'PENDING';
+      } else {
+        status = 'COMPLETED';
+      }
+
+      const progressPercent =
+        total === 0 ? 0 : Math.round((completed / total) * 100);
+
+      return {
+        id: s.id,
+        username: s.username,
+        status,
+        completedAssignments: completed,
+        totalAssignments: total,
+        progressPercent,
+      };
+    });
+
+    const vocab = lesson.vocab.map((v) => ({
+      id: v.id,
+      term: v.term,
+      translation: v.translation,
+      synonyms: (v.synonyms ?? []) as string[],
+    }));
+
+    const assignments = lesson.assignments.map((a) => ({
+      id: a.id,
+      type: a.type,
+      questions: a.questions.map((q) => ({
+        id: q.id,
+        text: q.text,
+        explanation: q.explanation,
+        answers: q.answers.map((ans) => ({
+          id: ans.id,
+          text: ans.text,
+          isCorrect: ans.isCorrect,
+        })),
+      })),
+    }));
+
+    return {
+      id: lesson.id,
+      title: lesson.title,
+      topic: lesson.topic,
+      level: lesson.level,
+      ageCategory: lesson.ageCategory,
+      vocab,
+      assignments,
+      groups,
+      students,
+    };
+  }
+
+  async getLessonsForTeacher(teacherId: number): Promise<LessonSummaryDto[]> {
+    const lessons = await this.lessonRepo.findAllByTeacher(teacherId);
+
+    return lessons.map((lesson) => ({
+      id: lesson.id,
+      title: lesson.title,
+      topic: lesson.topic,
+      level: lesson.level,
+      ageCategory: lesson.ageCategory,
+      vocabCount: lesson._count.vocab,
+      assignmentsCount: lesson._count.assignments,
+    }));
   }
 
   async vocabPreview(dto: VocabPreviewDto) {

@@ -18,6 +18,16 @@ export class LessonRepository {
         assignments: {
           include: {
             type: true,
+            studentAssignments: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    username: true,
+                  },
+                },
+              },
+            },
             questions: {
               include: {
                 answers: true,
@@ -25,10 +35,13 @@ export class LessonRepository {
             },
           },
         },
-
         groupLessons: {
           include: {
-            group: true,
+            group: {
+              include: {
+                members: true,
+              },
+            },
           },
         },
       },
@@ -53,5 +66,22 @@ export class LessonRepository {
         }),
       ),
     );
+  }
+
+  findAllByTeacher(teacherId: number) {
+    return this.prisma.lesson.findMany({
+      where: { createdById: teacherId },
+      include: {
+        _count: {
+          select: {
+            vocab: true,
+            assignments: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
   }
 }

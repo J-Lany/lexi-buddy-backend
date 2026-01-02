@@ -27,6 +27,7 @@ import { SaveVocabListDto } from './dto/save-vocab-list.dto';
 import { AssignmentPreviewDto } from './dto/assignment-preview.dto';
 import { SaveAssignmentDto } from './dto/save-assignment.dto';
 import { AssignLessonDto } from './dto/assign-lesson.dto';
+import { LessonSummaryDto } from './dto/lesson-summary.dto';
 
 @ApiTags('lessons')
 @ApiBearerAuth()
@@ -34,6 +35,20 @@ import { AssignLessonDto } from './dto/assign-lesson.dto';
 @Controller('lessons')
 export class LessonsController {
   constructor(private readonly lessonsService: LessonsService) {}
+
+  @Get()
+  @ApiOperation({
+    summary: 'Get all lessons for current teacher (summary info)',
+  })
+  @ApiOkResponse({
+    description: 'List of lessons with high-level info',
+    type: LessonSummaryDto,
+    isArray: true,
+  })
+  async getLessons(@CurrentUser() user: JwtPayload) {
+    const teacherId = user.sub;
+    return this.lessonsService.getLessonsForTeacher(teacherId);
+  }
 
   @Post()
   @ApiOperation({
