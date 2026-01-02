@@ -35,8 +35,6 @@ export class StudentsRepository {
       orderBy: { joinedAt: 'desc' },
     });
 
-    const groupIds = groups.map((g) => g.group.id);
-
     const student = await this.prisma.user.findUnique({
       where: { id: studentId },
       select: {
@@ -57,29 +55,32 @@ export class StudentsRepository {
       },
     });
 
-    const lessons = groupIds.length
-      ? await this.prisma.lesson.findMany({
-          where: {
-            archived: false,
-
-            groupLessons: {
+    const lessons = await this.prisma.lesson.findMany({
+      where: {
+        archived: false,
+        assignments: {
+          some: {
+            studentAssignments: {
               some: {
-                groupId: { in: groupIds },
+                userId: studentId,
               },
             },
           },
-          select: {
-            id: true,
-            title: true,
-            level: true,
-            topic: true,
-            createdAt: true,
-            archived: true,
-            assignments: { select: { id: true } },
-          },
-          orderBy: { createdAt: 'desc' },
-        })
-      : [];
+        },
+      },
+      select: {
+        id: true,
+        title: true,
+        level: true,
+        topic: true,
+        createdAt: true,
+        archived: true,
+        assignments: {
+          select: { id: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
 
     const assignmentIds = lessons.flatMap((l) =>
       l.assignments.map((a) => a.id),
