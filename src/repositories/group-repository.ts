@@ -22,6 +22,7 @@ export class GroupRepository {
       select: {
         id: true,
         name: true,
+        level: true,
         members: {
           where: {
             isActive: true,

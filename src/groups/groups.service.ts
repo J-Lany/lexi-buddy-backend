@@ -26,6 +26,7 @@ export class GroupsService {
     return groupsWithMultipleStudents.map((group) => ({
       id: group.id,
       name: group.name,
+      level: group.level,
       students: group.members.map((member) => {
         const student = member.user;
 
