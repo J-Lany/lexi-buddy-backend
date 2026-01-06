@@ -10,6 +10,12 @@ export class UserRepository {
     return this.prisma.user.findFirst({ where: { activationToken: token } });
   }
 
+  async deleteUser(userId: number) {
+    await this.prisma.user.delete({
+      where: { id: userId },
+    });
+  }
+
   async createUserByEmail(data: {
     passwordHash: string;
     roleId: number;

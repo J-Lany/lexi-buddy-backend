@@ -40,6 +40,7 @@ describe('AuthService (unit, manual DI)', () => {
       createUserByTelegram: jest.fn(),
       findByActivationToken: jest.fn(),
       updateUserVerification: jest.fn(),
+      deleteUser: jest.fn(),
       findByEmail: jest.fn(),
       updateRefreshTokenHash: jest.fn(),
       findById: jest.fn(),
@@ -115,7 +116,6 @@ describe('AuthService (unit, manual DI)', () => {
   // -------------------------------------------------------------------
   // ACTIVATE
   // -------------------------------------------------------------------
-
   describe('activate', () => {
     it('should throw if token is invalid', async () => {
       userRepo.findByActivationToken.mockResolvedValueOnce(null);
@@ -123,14 +123,52 @@ describe('AuthService (unit, manual DI)', () => {
       await expect(service.activate('invalid')).rejects.toThrow(
         'Invalid token',
       );
+
+      expect(userRepo.updateUserVerification).not.toHaveBeenCalled();
+      expect(userRepo.deleteUser).not.toHaveBeenCalled();
     });
 
-    it('should mark user as verified if token is valid', async () => {
-      userRepo.findByActivationToken.mockResolvedValueOnce({ id: 1 } as any);
+    it('should return already activated if user is verified', async () => {
+      userRepo.findByActivationToken.mockResolvedValueOnce({
+        id: 1,
+        verified: true,
+        activationExpires: new Date(Date.now() - 1000),
+      } as any);
 
-      await service.activate('valid-token');
+      const result = await service.activate('any-token');
 
+      expect(result).toEqual({ message: 'Account already activated' });
+      expect(userRepo.updateUserVerification).not.toHaveBeenCalled();
+      expect(userRepo.deleteUser).not.toHaveBeenCalled();
+    });
+
+    it('should delete user and throw if token is expired and user not verified', async () => {
+      userRepo.findByActivationToken.mockResolvedValueOnce({
+        id: 1,
+        verified: false,
+        activationExpires: new Date(Date.now() - 1000), // истёк
+      } as any);
+
+      await expect(service.activate('expired-token')).rejects.toThrow(
+        'Activation token expired',
+      );
+
+      expect(userRepo.deleteUser).toHaveBeenCalledWith(1);
+      expect(userRepo.updateUserVerification).not.toHaveBeenCalled();
+    });
+
+    it('should mark user as verified if token is valid and not expired', async () => {
+      userRepo.findByActivationToken.mockResolvedValueOnce({
+        id: 1,
+        verified: false,
+        activationExpires: new Date(Date.now() + 60_000), // валиден
+      } as any);
+
+      const result = await service.activate('valid-token');
+
+      expect(result).toEqual({ message: 'Account activated' });
       expect(userRepo.updateUserVerification).toHaveBeenCalledWith(1);
+      expect(userRepo.deleteUser).not.toHaveBeenCalled();
     });
   });
 

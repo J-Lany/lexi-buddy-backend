@@ -90,7 +90,20 @@ export class AuthService {
   async activate(token: string) {
     const user = await this.userRepo.findByActivationToken(token);
 
-    if (!user) throw new BadRequestException('Invalid token');
+    if (!user) {
+      throw new BadRequestException('Invalid token');
+    }
+
+    if (user.verified) {
+      return { message: 'Account already activated' };
+    }
+
+    const now = new Date();
+
+    if (!user.activationExpires || user.activationExpires < now) {
+      await this.userRepo.deleteUser(user.id);
+      throw new BadRequestException('Activation token expired');
+    }
 
     await this.userRepo.updateUserVerification(user.id);
 
