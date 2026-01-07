@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
-import { AgeGroup, Level } from '@prisma/client';
 
 @Injectable()
 export class UserRepository {
@@ -44,20 +43,18 @@ export class UserRepository {
   async createUserByTelegram(data: {
     firstName?: string;
     lastName?: string;
-    ageGroup?: AgeGroup;
     roleId: number;
     telegramId: number;
     username?: string;
     contactTypeId: number;
-    level?: Level;
+    avatarUrl?: string | null;
   }) {
     const user = await this.prisma.user.create({
       data: {
         firstName: data.firstName,
         lastName: data.lastName,
-        ageGroup: data.ageGroup,
         roleId: data.roleId,
-        level: data.level,
+        avatarUrl: data.avatarUrl,
         passwordHash: null,
         verified: true,
         username: data.username,

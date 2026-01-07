@@ -6,6 +6,64 @@ import { CreateGroupDto } from 'groups/dto/create-group.dto';
 export class GroupRepository {
   constructor(public readonly prisma: PrismaService) {}
 
+  async findValidGroupsByTeacher(teacherId: number) {
+    const groups = await this.prisma.group.findMany({
+      where: {
+        members: {
+          some: {
+            userId: teacherId,
+            isActive: true,
+            role: { name: 'teacher' },
+          },
+        },
+        archived: false,
+      },
+      select: {
+        id: true,
+        name: true,
+        _count: {
+          select: {
+            members: { where: { isActive: true } },
+          },
+        },
+      },
+    });
+
+    return groups.filter((g) => g._count.members > 1);
+  }
+
+  async findStudentsWithGroups(groupIds: number[]) {
+    return this.prisma.user.findMany({
+      where: {
+        groupMemberships: {
+          some: {
+            groupId: { in: groupIds },
+            isActive: true,
+            role: { name: 'student' },
+          },
+        },
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        level: true,
+        username: true,
+        avatarUrl: true,
+        groupMemberships: {
+          where: {
+            groupId: { in: groupIds },
+            isActive: true,
+            role: { name: 'student' },
+          },
+          select: {
+            group: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+  }
+
   async findByTeacher(teacherId: number) {
     return this.prisma.group.findMany({
       where: {
