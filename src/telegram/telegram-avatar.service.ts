@@ -20,11 +20,9 @@ export class TelegramAvatarService {
 
     try {
       const fileUrl = await this.telegramApi.getUserAvatarFileUrl(telegramId);
-      console.log('[TG AVATAR] fileUrl', { telegramId, hasUrl: !!fileUrl });
 
       if (!fileUrl) return null;
 
-      // Скачиваем картинку в память
       const res = await axios.get<ArrayBuffer>(fileUrl, {
         responseType: 'arraybuffer',
         timeout: 15_000,
@@ -34,15 +32,7 @@ export class TelegramAvatarService {
       const contentType =
         (res.headers['content-type'] as string | undefined) ?? 'image/jpeg';
 
-      console.log('[TG AVATAR] downloaded', {
-        telegramId,
-        httpStatus: res.status,
-        bytes,
-        contentType,
-      });
-
       if (!bytes) {
-        console.log('[TG AVATAR] downloaded_zero_bytes', { telegramId });
         return null;
       }
 
@@ -58,24 +48,15 @@ export class TelegramAvatarService {
               ? 'jpg'
               : 'jpg';
 
-      const { url, key } = await this.storage.uploadUserAvatar(
+      const { url } = await this.storage.uploadUserAvatar(
         telegramId,
         buffer,
         contentType,
         ext,
       );
 
-      console.log('[TG AVATAR] uploaded', { telegramId, key, url });
-
       return url;
-    } catch (e: any) {
-      console.error('[TG AVATAR] error', {
-        telegramId,
-        message: e?.message ?? String(e),
-        // если хочешь глубже — раскомментируй:
-        // stack: e?.stack,
-      });
-      // Регистрация не должна падать из-за аватара
+    } catch {
       return null;
     }
   }

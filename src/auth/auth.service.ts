@@ -64,7 +64,6 @@ export class AuthService {
   }
 
   async registerTelegram(dto: RegisterTelegramDto) {
-    console.log('Auth started');
     const existing = await this.userContactRepo.findByTelegram(dto.telegramId);
     if (existing) throw new BadRequestException('Username already exists');
 

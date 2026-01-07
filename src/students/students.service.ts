@@ -19,21 +19,16 @@ export class StudentsService {
   ) {}
 
   async getStudents(teacherId: number): Promise<StudentDto[]> {
-    const validGroups =
-      await this.groupRepo.findValidGroupsByTeacher(teacherId);
-    if (!validGroups.length) return [];
+    const students =
+      await this.groupRepo.findTeacherStudentsWithPublicGroups(teacherId);
 
-    const groupIds = validGroups.map((g) => g.id);
-
-    const students = await this.groupRepo.findStudentsWithGroups(groupIds);
-
-    return students.map((u) => ({
+    return (students ?? []).map((u) => ({
       id: u.id,
       name: u.firstName || u.lastName || '',
       level: u.level,
       username: u.username,
       avatarUrl: u.avatarUrl,
-      groups: u.groupMemberships.map((m) => m.group),
+      groups: (u.groupMemberships ?? []).map((m) => m.group),
     }));
   }
 

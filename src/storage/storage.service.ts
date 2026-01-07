@@ -30,18 +30,8 @@ export class StorageService {
       endpoint: this.endpoint,
       credentials: { accessKeyId, secretAccessKey },
     });
-
-    console.log('[S3] client_init', {
-      bucket: this.bucket,
-      region: this.region,
-      endpoint: this.endpoint,
-      publicBaseUrl: this.publicBaseUrl,
-    });
   }
 
-  /**
-   * Загружает аватар. Ключ версионный -> можно cache-control "immutable".
-   */
   async uploadUserAvatar(
     userId: number,
     buffer: Buffer,
@@ -50,13 +40,6 @@ export class StorageService {
   ): Promise<{ key: string; url: string }> {
     const safeExt = ext.startsWith('.') ? ext : `.${ext}`;
     const key = `avatars/users/${userId}/${Date.now()}-${randomUUID()}${safeExt}`;
-
-    console.log('[S3] putObject:start', {
-      bucket: this.bucket,
-      key,
-      bytes: buffer.length,
-      contentType,
-    });
 
     await this.s3.send(
       new PutObjectCommand({
@@ -69,8 +52,6 @@ export class StorageService {
     );
 
     const url = `${this.publicBaseUrl}/${key}`;
-
-    console.log('[S3] putObject:ok', { key, url });
 
     return { key, url };
   }

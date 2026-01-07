@@ -6,40 +6,26 @@ import { CreateGroupDto } from 'groups/dto/create-group.dto';
 export class GroupRepository {
   constructor(public readonly prisma: PrismaService) {}
 
-  async findValidGroupsByTeacher(teacherId: number) {
-    const groups = await this.prisma.group.findMany({
-      where: {
-        members: {
-          some: {
-            userId: teacherId,
-            isActive: true,
-            role: { name: 'teacher' },
-          },
-        },
-        archived: false,
-      },
-      select: {
-        id: true,
-        name: true,
-        _count: {
-          select: {
-            members: { where: { isActive: true } },
-          },
-        },
-      },
-    });
+  async findTeacherStudentsWithPublicGroups(teacherId: number) {
+    const INDIVIDUAL_DESC = 'Индивидуальная группа (1-на-1)';
+    const INDIVIDUAL_NAME_PREFIX = 'Индивидуально с учителем';
 
-    return groups.filter((g) => g._count.members > 1);
-  }
-
-  async findStudentsWithGroups(groupIds: number[]) {
     return this.prisma.user.findMany({
       where: {
+        // пользователь — студент в какой-то группе
         groupMemberships: {
           some: {
-            groupId: { in: groupIds },
             isActive: true,
             role: { name: 'student' },
+            group: {
+              members: {
+                some: {
+                  userId: teacherId,
+                  isActive: true,
+                  role: { name: 'teacher' },
+                },
+              },
+            },
           },
         },
       },
@@ -50,17 +36,32 @@ export class GroupRepository {
         level: true,
         username: true,
         avatarUrl: true,
+
         groupMemberships: {
           where: {
-            groupId: { in: groupIds },
             isActive: true,
             role: { name: 'student' },
+            group: {
+              archived: false,
+              NOT: [
+                { description: INDIVIDUAL_DESC },
+                { name: { startsWith: INDIVIDUAL_NAME_PREFIX } },
+              ],
+              members: {
+                some: {
+                  userId: teacherId,
+                  isActive: true,
+                  role: { name: 'teacher' },
+                },
+              },
+            },
           },
           select: {
             group: { select: { id: true, name: true } },
           },
         },
       },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });
   }
 
