@@ -25,6 +25,7 @@ describe('AuthService (unit, manual DI)', () => {
   let userContactRepo: jest.Mocked<UserContactRepository>;
 
   beforeEach(() => {
+    process.env.JWT_SECRET = 'test-secret';
     mailService = {
       sendActivationMail: jest.fn(),
     } as any;
