@@ -29,6 +29,7 @@ CREATE TABLE "User" (
     "level" "Level",
     "ageGroup" "AgeGroup",
     "lastVisit" TIMESTAMP(3),
+    "avatarUrl" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "activationToken" TEXT,
@@ -187,6 +188,7 @@ CREATE TABLE "AssignmentQuestion" (
     "text" TEXT NOT NULL,
     "questionTypeId" INTEGER NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "explanation" TEXT,
 
     CONSTRAINT "AssignmentQuestion_pkey" PRIMARY KEY ("id")
 );

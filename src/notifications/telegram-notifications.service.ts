@@ -47,7 +47,6 @@ export class TelegramNotificationsService {
       this.logger.error(
         `Failed to send teacher request notification to bot: ${errorMessage}`,
       );
-      // В MVP можно просто логнуть, не падать фатально
     }
   }
 }

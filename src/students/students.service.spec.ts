@@ -1,18 +1,35 @@
-/* eslint-disable @typescript-eslint/unbound-method */
-
 import { StudentsService } from './students.service';
 import { GroupRepository } from 'repositories/group-repository';
+import { UserRepository } from 'repositories/user.repository';
+import { StudentsRepository } from 'repositories/student-repository';
 
 describe('StudentsService (unit, manual DI)', () => {
   let service: StudentsService;
-  let groupRepo: jest.Mocked<GroupRepository>;
+
+  let groupRepo: jest.Mocked<Partial<GroupRepository>>;
+  let userRepo: jest.Mocked<Partial<UserRepository>>;
+  let studentsRepo: jest.Mocked<Partial<StudentsRepository>>;
 
   beforeEach(() => {
     groupRepo = {
       findByTeacher: jest.fn(),
-    } as any;
+      teacherHasStudent: jest.fn(),
+      findTeacherStudentsWithPublicGroups: jest.fn(),
+    };
 
-    service = new StudentsService(groupRepo);
+    userRepo = {
+      searchStudentsByUsername: jest.fn(),
+    };
+
+    studentsRepo = {
+      getStudentDashboardRaw: jest.fn(),
+    };
+
+    service = new StudentsService(
+      groupRepo as any,
+      userRepo as any,
+      studentsRepo as any,
+    );
   });
 
   afterEach(() => {
@@ -22,107 +39,52 @@ describe('StudentsService (unit, manual DI)', () => {
   // -------------------------------------------------------------------
   // getStudents
   // -------------------------------------------------------------------
-
   describe('getStudents', () => {
-    it('should return empty array if no groups', async () => {
-      groupRepo.findByTeacher.mockResolvedValueOnce([]);
+    it('should return empty array if no students', async () => {
+      (
+        groupRepo.findTeacherStudentsWithPublicGroups as jest.Mock
+      ).mockResolvedValueOnce([]);
 
       const result = await service.getStudents(1);
 
-      expect(groupRepo.findByTeacher).toHaveBeenCalledWith(1);
+      expect(
+        groupRepo.findTeacherStudentsWithPublicGroups,
+      ).toHaveBeenCalledWith(1);
       expect(result).toEqual([]);
     });
 
-    it('should return empty array if groups is null/undefined (defensive)', async () => {
-      groupRepo.findByTeacher.mockResolvedValueOnce(null as any);
-
-      const result = await service.getStudents(1);
-
-      expect(result).toEqual([]);
-    });
-
-    it('should flatten unique students across all groups', async () => {
-      // один и тот же студент в двух группах
-      groupRepo.findByTeacher.mockResolvedValueOnce([
-        {
-          id: 10,
-          name: 'Group A',
-          members: [
-            {
-              user: {
-                id: 100,
-                firstName: 'Petr',
-                lastName: 'Petrov',
-                level: 'INTERMEDIATE',
-                username: undefined,
-              },
-            },
-          ],
-        },
-        {
-          id: 20,
-          name: 'Group B',
-          members: [
-            {
-              user: {
-                id: 100,
-                firstName: 'Petr',
-                lastName: 'Petrov',
-                level: 'INTERMEDIATE',
-                username: undefined,
-              },
-            },
-            {
-              user: {
-                id: 200,
-                firstName: null,
-                lastName: 'Sidorova',
-                level: 'BEGINNER',
-                username: undefined,
-              },
-            },
-          ],
-        },
-      ] as any);
-
-      const result = await service.getStudents(1);
-
-      expect(result).toEqual([
+    it('should map students and attach only public groups from memberships', async () => {
+      (
+        groupRepo.findTeacherStudentsWithPublicGroups as jest.Mock
+      ).mockResolvedValueOnce([
         {
           id: 100,
-          name: 'Petr', // берётся firstName
+          firstName: 'Petr',
+          lastName: 'Petrov',
           level: 'INTERMEDIATE',
           username: undefined,
+          avatarUrl: 'https://cdn/a.png',
+          groupMemberships: [
+            { group: { id: 10, name: 'Group A' } },
+            { group: { id: 20, name: 'Group B' } },
+          ],
         },
         {
           id: 200,
-          name: 'Sidorova', // firstName null, берём lastName
+          firstName: null,
+          lastName: 'Sidorova',
           level: 'BEGINNER',
-          username: undefined,
+          username: 'sidorova',
+          avatarUrl: null,
+          groupMemberships: [{ group: { id: 20, name: 'Group B' } }],
         },
       ]);
-    });
-
-    it('should set telegramValue to null if telegram contact not found', async () => {
-      groupRepo.findByTeacher.mockResolvedValueOnce([
-        {
-          id: 10,
-          name: 'Group A',
-          members: [
-            {
-              user: {
-                id: 100,
-                firstName: 'Petr',
-                lastName: 'Petrov',
-                level: 'INTERMEDIATE',
-                username: undefined,
-              },
-            },
-          ],
-        },
-      ] as any);
 
       const result = await service.getStudents(1);
+
+      expect(
+        groupRepo.findTeacherStudentsWithPublicGroups,
+      ).toHaveBeenCalledWith(1);
 
       expect(result).toEqual([
         {
@@ -130,6 +92,77 @@ describe('StudentsService (unit, manual DI)', () => {
           name: 'Petr',
           level: 'INTERMEDIATE',
           username: undefined,
+          avatarUrl: 'https://cdn/a.png',
+          groups: [
+            { id: 10, name: 'Group A' },
+            { id: 20, name: 'Group B' },
+          ],
+        },
+        {
+          id: 200,
+          name: 'Sidorova',
+          level: 'BEGINNER',
+          username: 'sidorova',
+          avatarUrl: null,
+          groups: [{ id: 20, name: 'Group B' }],
+        },
+      ]);
+    });
+
+    it('should include student even if they are only in private group (public groups empty)', async () => {
+      (
+        groupRepo.findTeacherStudentsWithPublicGroups as jest.Mock
+      ).mockResolvedValueOnce([
+        {
+          id: 300,
+          firstName: 'Ivan',
+          lastName: 'Ivanov',
+          level: 'A2',
+          username: 'ivan',
+          avatarUrl: null,
+          groupMemberships: [],
+        },
+      ]);
+
+      const result = await service.getStudents(1);
+
+      expect(result).toEqual([
+        {
+          id: 300,
+          name: 'Ivan',
+          level: 'A2',
+          username: 'ivan',
+          avatarUrl: null,
+          groups: [],
+        },
+      ]);
+    });
+
+    it('should be defensive for missing memberships array', async () => {
+      (
+        groupRepo.findTeacherStudentsWithPublicGroups as jest.Mock
+      ).mockResolvedValueOnce([
+        {
+          id: 400,
+          firstName: 'NoGroups',
+          lastName: null,
+          level: null,
+          username: null,
+          avatarUrl: null,
+          groupMemberships: null,
+        },
+      ]);
+
+      const result = await service.getStudents(1);
+
+      expect(result).toEqual([
+        {
+          id: 400,
+          name: 'NoGroups',
+          level: null,
+          username: null,
+          avatarUrl: null,
+          groups: [],
         },
       ]);
     });
@@ -138,10 +171,9 @@ describe('StudentsService (unit, manual DI)', () => {
   // -------------------------------------------------------------------
   // getGroups
   // -------------------------------------------------------------------
-
   describe('getGroups', () => {
     it('should map groups and students with telegram values', async () => {
-      groupRepo.findByTeacher.mockResolvedValueOnce([
+      (groupRepo.findByTeacher as jest.Mock).mockResolvedValueOnce([
         {
           id: 10,
           name: 'Group A',
@@ -157,10 +189,7 @@ describe('StudentsService (unit, manual DI)', () => {
                     contactValue: 'petr@example.com',
                     contactType: { name: 'email' },
                   },
-                  {
-                    contactValue: '111',
-                    contactType: { name: 'telegram' },
-                  },
+                  { contactValue: '111', contactType: { name: 'telegram' } },
                 ],
               },
             },
@@ -175,7 +204,7 @@ describe('StudentsService (unit, manual DI)', () => {
             },
           ],
         },
-      ] as any);
+      ]);
 
       const result = await service.getGroups(1);
 

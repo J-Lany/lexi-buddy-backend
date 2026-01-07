@@ -10,6 +10,8 @@ const config: Config = {
     '^prisma/(.*)$': '<rootDir>/src/prisma/$1',
     '^notifications/(.*)$': '<rootDir>/src/notifications/$1',
     '^common/(.*)$': '<rootDir>/src/common/$1',
+    '^telegram/(.*)$': '<rootDir>/src/telegram/$1',
+    '^storage/(.*)$': '<rootDir>/src/storage/$1',
   },
   testRegex: '.*\\.spec\\.ts$',
   moduleFileExtensions: ['ts', 'js', 'json'],

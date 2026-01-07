@@ -6,6 +6,65 @@ import { CreateGroupDto } from 'groups/dto/create-group.dto';
 export class GroupRepository {
   constructor(public readonly prisma: PrismaService) {}
 
+  async findTeacherStudentsWithPublicGroups(teacherId: number) {
+    const INDIVIDUAL_DESC = 'Индивидуальная группа (1-на-1)';
+    const INDIVIDUAL_NAME_PREFIX = 'Индивидуально с учителем';
+
+    return this.prisma.user.findMany({
+      where: {
+        // пользователь — студент в какой-то группе
+        groupMemberships: {
+          some: {
+            isActive: true,
+            role: { name: 'student' },
+            group: {
+              members: {
+                some: {
+                  userId: teacherId,
+                  isActive: true,
+                  role: { name: 'teacher' },
+                },
+              },
+            },
+          },
+        },
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        level: true,
+        username: true,
+        avatarUrl: true,
+
+        groupMemberships: {
+          where: {
+            isActive: true,
+            role: { name: 'student' },
+            group: {
+              archived: false,
+              NOT: [
+                { description: INDIVIDUAL_DESC },
+                { name: { startsWith: INDIVIDUAL_NAME_PREFIX } },
+              ],
+              members: {
+                some: {
+                  userId: teacherId,
+                  isActive: true,
+                  role: { name: 'teacher' },
+                },
+              },
+            },
+          },
+          select: {
+            group: { select: { id: true, name: true } },
+          },
+        },
+      },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+    });
+  }
+
   async findByTeacher(teacherId: number) {
     return this.prisma.group.findMany({
       where: {

@@ -10,6 +10,9 @@ import { UserRepository } from 'repositories/user.repository';
 import { ContactTypeRepository } from 'repositories/contact-type.repository';
 import { UserContactRepository } from 'repositories/user-contact.repository';
 import { RoleRepository } from 'repositories/role.repository';
+import { StorageService } from 'storage/storage.service';
+import { TelegramAvatarService } from 'telegram/telegram-avatar.service';
+import { TelegramApiService } from 'telegram/telegram-api.service';
 
 @Module({
   imports: [
@@ -25,6 +28,9 @@ import { RoleRepository } from 'repositories/role.repository';
   controllers: [AuthController],
   providers: [
     AuthService,
+    StorageService,
+    TelegramAvatarService,
+    TelegramApiService,
     UserRepository,
     ContactTypeRepository,
     UserContactRepository,

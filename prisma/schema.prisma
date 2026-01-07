@@ -73,6 +73,7 @@ model User {
   level     Level?
   ageGroup  AgeGroup?
   lastVisit DateTime?
+  avatarUrl String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

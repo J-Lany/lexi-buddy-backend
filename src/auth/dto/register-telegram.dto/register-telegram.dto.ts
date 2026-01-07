@@ -1,6 +1,5 @@
-import { IsString, IsOptional, IsInt, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsInt } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { AgeGroup, Level } from '@prisma/client';
 
 export class RegisterTelegramDto {
   @ApiProperty()
@@ -17,18 +16,13 @@ export class RegisterTelegramDto {
   @IsString()
   lastName?: string;
 
-  @ApiProperty({ enum: AgeGroup, required: false })
-  @IsOptional()
-  @IsEnum(AgeGroup)
-  ageGroup?: AgeGroup;
-
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
   username?: string;
 
-  @ApiProperty({ enum: Level, required: false })
+  @ApiProperty({ required: false })
   @IsOptional()
-  @IsEnum(Level)
-  level?: Level;
+  @IsString()
+  telegramAvatarUrl?: string;
 }

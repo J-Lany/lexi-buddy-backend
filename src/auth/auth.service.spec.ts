@@ -6,7 +6,6 @@ import { UserRepository } from 'repositories/user.repository';
 import { RoleRepository } from 'repositories/role.repository';
 import { ContactTypeRepository } from 'repositories/contact-type.repository';
 import { UserContactRepository } from 'repositories/user-contact.repository';
-import { BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon from 'argon2';
 
@@ -26,6 +25,7 @@ describe('AuthService (unit, manual DI)', () => {
   let userContactRepo: jest.Mocked<UserContactRepository>;
 
   beforeEach(() => {
+    process.env.JWT_SECRET = 'test-secret';
     mailService = {
       sendActivationMail: jest.fn(),
     } as any;
@@ -44,6 +44,7 @@ describe('AuthService (unit, manual DI)', () => {
       findByEmail: jest.fn(),
       updateRefreshTokenHash: jest.fn(),
       findById: jest.fn(),
+      findByTelegramId: jest.fn(),
     } as any;
 
     roleRepo = {
@@ -67,6 +68,7 @@ describe('AuthService (unit, manual DI)', () => {
       contactTypeRepo,
       userContactRepo,
       roleRepo,
+      undefined,
     );
   });
 
@@ -77,35 +79,43 @@ describe('AuthService (unit, manual DI)', () => {
   // -------------------------------------------------------------------
   // REGISTER (EMAIL)
   // -------------------------------------------------------------------
-
   describe('register', () => {
     it('should throw if email already exists', async () => {
       userContactRepo.findByEmail.mockResolvedValueOnce({ id: 1 } as any);
 
       await expect(
-        service.register({ email: 'test@mail.com', password: '1234' }),
-      ).rejects.toThrow(BadRequestException);
+        service.register({ email: 'test@mail.com', password: '1234' } as any),
+      ).rejects.toThrow('Email already exist');
+
+      expect(roleRepo.findGlobalRole).not.toHaveBeenCalled();
+      expect(contactTypeRepo.findByName).not.toHaveBeenCalled();
+      expect(userRepo.createUserByEmail).not.toHaveBeenCalled();
+      expect(mailService.sendActivationMail).not.toHaveBeenCalled();
     });
 
     it('should throw if teacher role not found', async () => {
-      userContactRepo.findByEmail.mockResolvedValueOnce(null);
+      userContactRepo.findByEmail.mockResolvedValueOnce(null as any);
+      (argon.hash as jest.Mock).mockResolvedValueOnce('hashed-pass');
       roleRepo.findGlobalRole.mockResolvedValueOnce(null as any);
 
       await expect(
-        service.register({ email: 'new@mail.com', password: '1234' }),
+        service.register({ email: 'new@mail.com', password: '1234' } as any),
       ).rejects.toThrow('Teacher role not found');
+
+      expect(roleRepo.findGlobalRole).toHaveBeenCalledWith('teacher');
     });
 
     it('should call sendActivationMail after successful registration', async () => {
-      userContactRepo.findByEmail.mockResolvedValueOnce(null);
+      userContactRepo.findByEmail.mockResolvedValueOnce(null as any);
+      (argon.hash as jest.Mock).mockResolvedValueOnce('hashed-pass');
       roleRepo.findGlobalRole.mockResolvedValueOnce({ id: 1 } as any);
       contactTypeRepo.findByName.mockResolvedValueOnce({ id: 2 } as any);
       userRepo.createUserByEmail.mockResolvedValueOnce({} as any);
 
-      (argon.hash as jest.Mock).mockResolvedValueOnce('hashed-pass');
+      await service.register({ email: 'ok@mail.com', password: '1234' } as any);
 
-      await service.register({ email: 'ok@mail.com', password: '1234' });
-
+      expect(roleRepo.findGlobalRole).toHaveBeenCalledWith('teacher');
+      expect(contactTypeRepo.findByName).toHaveBeenCalledWith('email');
       expect(mailService.sendActivationMail).toHaveBeenCalledWith(
         'ok@mail.com',
         expect.any(String),
@@ -118,7 +128,7 @@ describe('AuthService (unit, manual DI)', () => {
   // -------------------------------------------------------------------
   describe('activate', () => {
     it('should throw if token is invalid', async () => {
-      userRepo.findByActivationToken.mockResolvedValueOnce(null);
+      userRepo.findByActivationToken.mockResolvedValueOnce(null as any);
 
       await expect(service.activate('invalid')).rejects.toThrow(
         'Invalid token',
@@ -146,7 +156,7 @@ describe('AuthService (unit, manual DI)', () => {
       userRepo.findByActivationToken.mockResolvedValueOnce({
         id: 1,
         verified: false,
-        activationExpires: new Date(Date.now() - 1000), // истёк
+        activationExpires: new Date(Date.now() - 1000),
       } as any);
 
       await expect(service.activate('expired-token')).rejects.toThrow(
@@ -161,7 +171,7 @@ describe('AuthService (unit, manual DI)', () => {
       userRepo.findByActivationToken.mockResolvedValueOnce({
         id: 1,
         verified: false,
-        activationExpires: new Date(Date.now() + 60_000), // валиден
+        activationExpires: new Date(Date.now() + 60_000),
       } as any);
 
       const result = await service.activate('valid-token');
@@ -175,14 +185,13 @@ describe('AuthService (unit, manual DI)', () => {
   // -------------------------------------------------------------------
   // LOGIN
   // -------------------------------------------------------------------
-
   describe('login', () => {
     const dto = { email: 'test@mail.com', password: 'pass123' };
 
     it('should throw if user not found', async () => {
-      userRepo.findByEmail.mockResolvedValueOnce(null);
+      userRepo.findByEmail.mockResolvedValueOnce(null as any);
 
-      await expect(service.login(dto)).rejects.toThrow(
+      await expect(service.login(dto as any)).rejects.toThrow(
         'User by this email is not found',
       );
     });
@@ -193,7 +202,7 @@ describe('AuthService (unit, manual DI)', () => {
         verified: false,
       } as any);
 
-      await expect(service.login(dto)).rejects.toThrow(
+      await expect(service.login(dto as any)).rejects.toThrow(
         'Email not verified. Check your mailbox',
       );
     });
@@ -206,7 +215,9 @@ describe('AuthService (unit, manual DI)', () => {
 
       (argon.verify as jest.Mock).mockResolvedValueOnce(false);
 
-      await expect(service.login(dto)).rejects.toThrow('Invalid password');
+      await expect(service.login(dto as any)).rejects.toThrow(
+        'Invalid password',
+      );
     });
 
     it('should return tokens and update refresh token hash', async () => {
@@ -220,12 +231,14 @@ describe('AuthService (unit, manual DI)', () => {
       } as any);
 
       (argon.verify as jest.Mock).mockResolvedValueOnce(true);
-      (argon.hash as jest.Mock).mockResolvedValueOnce('refresh-hash');
+
       (jwtService.signAsync as jest.Mock)
         .mockResolvedValueOnce('access')
         .mockResolvedValueOnce('refresh');
 
-      const result = await service.login(dto);
+      (argon.hash as jest.Mock).mockResolvedValueOnce('refresh-hash');
+
+      const result = await service.login(dto as any);
 
       expect(result).toEqual({
         accessToken: 'access',
@@ -241,13 +254,29 @@ describe('AuthService (unit, manual DI)', () => {
         1,
         'refresh-hash',
       );
+
+      expect(jwtService.signAsync).toHaveBeenNthCalledWith(
+        1,
+        { sub: 1, roleId: 2 },
+        expect.objectContaining({
+          expiresIn: '15m',
+          secret: expect.any(String),
+        }),
+      );
+      expect(jwtService.signAsync).toHaveBeenNthCalledWith(
+        2,
+        { sub: 1, roleId: 2 },
+        expect.objectContaining({
+          expiresIn: '30d',
+          secret: expect.any(String),
+        }),
+      );
     });
   });
 
   // -------------------------------------------------------------------
   // LOGOUT
   // -------------------------------------------------------------------
-
   describe('logout', () => {
     it('should remove refresh token hash', async () => {
       userRepo.updateRefreshTokenHash.mockResolvedValueOnce({} as any);

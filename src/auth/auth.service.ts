@@ -16,6 +16,7 @@ import { RoleRepository } from 'repositories/role.repository';
 import { UserContactRepository } from 'repositories/user-contact.repository';
 import { LoginrDto } from './dto/login.dto/login.dto';
 import { RegisterTelegramDto } from './dto/register-telegram.dto/register-telegram.dto';
+import { TelegramAvatarService } from 'telegram/telegram-avatar.service';
 
 @Injectable()
 export class AuthService {
@@ -27,6 +28,7 @@ export class AuthService {
     private contactTypeRepo: ContactTypeRepository,
     private userContactRepo: UserContactRepository,
     private roleRepo: RoleRepository,
+    private telegramAvatarService?: TelegramAvatarService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -73,15 +75,20 @@ export class AuthService {
     if (!contactType)
       throw new BadRequestException('Telegram contact type not found');
 
+    const avatarUrl = this.telegramAvatarService
+      ? await this.telegramAvatarService.saveTelegramAvatarByTelegramId(
+          dto.telegramId,
+        )
+      : null;
+
     const user = await this.userRepo.createUserByTelegram({
       firstName: dto.firstName,
       lastName: dto.lastName,
-      ageGroup: dto.ageGroup,
       roleId: role.id,
       username: dto.username,
-      level: dto.level,
       telegramId: dto.telegramId || 0,
       contactTypeId: contactType.id,
+      avatarUrl,
     });
 
     return user;
