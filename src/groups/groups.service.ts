@@ -232,6 +232,7 @@ export class GroupsService {
       name: u.firstName || u.lastName || '',
       username: u.username,
       level: u.level,
+      avatarUrl: u.avatarUrl,
       telegramValue:
         u.contacts.find((c) => c.contactType.name === 'telegram')
           ?.contactValue ?? null,

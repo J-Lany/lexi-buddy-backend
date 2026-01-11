@@ -24,6 +24,10 @@ export class LessonRepository {
                   select: {
                     id: true,
                     username: true,
+                    avatarUrl: true,
+                    firstName: true,
+                    lastName: true,
+                    lastVisit: true,
                   },
                 },
               },

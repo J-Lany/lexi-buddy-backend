@@ -7,6 +7,7 @@ export type StudentDashboardDto = {
     level: string | null;
     ageGroup: string | null;
     lastVisit: Date | null;
+    avatarUrl: string | null;
     createdAt: Date;
   };
   groups: Array<{

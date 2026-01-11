@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from 'prisma/prisma.service';
 import { LessonRepository } from 'repositories/lesson.repository';
 import { AssignmentRepository } from 'repositories/assignment.repository';
@@ -123,6 +124,10 @@ export class LessonsService {
       {
         id: number;
         username: string | null;
+        avatarUrl: string | null;
+        firstName: string | null;
+        lastName: string | null;
+        lastVisit: Date | null;
         completedAssignments: number;
       }
     >();
@@ -134,6 +139,10 @@ export class LessonsService {
         const existing = studentsMap.get(sa.user.id) ?? {
           id: sa.user.id,
           username: sa.user.username,
+          avatarUrl: sa.user.avatarUrl,
+          firstName: sa.user.firstName,
+          lastName: sa.user.lastName,
+          lastVisit: sa.user.lastVisit,
           completedAssignments: 0,
         };
 
@@ -170,6 +179,10 @@ export class LessonsService {
       return {
         id: s.id,
         username: s.username,
+        avatarUrl: s.avatarUrl,
+        lastName: s.lastName,
+        firstName: s.firstName,
+        lastVisit: s.lastVisit,
         status,
         completedAssignments: completed,
         totalAssignments: total,
@@ -302,76 +315,135 @@ export class LessonsService {
     dto: AssignLessonDto,
     teacherId: number,
   ) {
-    const lesson = await this.prisma.lesson.findUnique({
-      where: { id: lessonId },
-      include: { assignments: true },
-    });
-    if (!lesson) throw new NotFoundException('Lesson not found');
-
-    this.ensureLessonOwner(lesson.createdById, teacherId);
-
-    const studentIds = new Set<number>();
-
-    dto.studentIds?.forEach((id) => studentIds.add(id));
-
-    if (dto.groupIds?.length) {
-      const groups = await this.prisma.group.findMany({
-        where: {
-          id: { in: dto.groupIds },
-          members: {
-            some: {
-              userId: teacherId,
-              isActive: true,
-            },
-          },
-        },
-      });
-
-      const allowedGroupIds = new Set(groups.map((g) => g.id));
-      const forbidden = dto.groupIds.filter((id) => !allowedGroupIds.has(id));
-      if (forbidden.length) {
-        throw new ForbiddenException(
-          `You are not a member of groups: ${forbidden.join(', ')}`,
-        );
-      }
-
-      const members = await this.prisma.groupMember.findMany({
-        where: {
-          groupId: { in: dto.groupIds },
-          isActive: true,
-        },
-      });
-      members.forEach((m) => studentIds.add(m.userId));
-    }
-
-    const ids = [...studentIds];
-    if (!ids.length || !lesson.assignments.length) {
-      return { created: 0 };
-    }
-
-    await this.prisma.$transaction(
-      ids.flatMap((userId) =>
-        lesson.assignments.map((a) =>
-          this.prisma.studentAssignment.create({
-            data: {
-              user: { connect: { id: userId } },
-              assignment: { connect: { id: a.id } },
-            },
-          }),
-        ),
-      ),
+    const groupIds = Array.from(
+      new Set((dto.groupIds ?? []).filter((x) => Number.isInteger(x))),
     );
 
-    if (dto.groupIds?.length) {
-      await this.prisma.groupLesson.createMany({
-        data: dto.groupIds.map((groupId) => ({
-          groupId,
-          lessonId,
-        })),
-        skipDuplicates: true,
-      });
+    const directStudentIds = Array.from(
+      new Set((dto.studentIds ?? []).filter((x) => Number.isInteger(x))),
+    );
+
+    if (!groupIds.length && !directStudentIds.length) {
+      throw new BadRequestException('studentIds or groupIds must be provided');
     }
 
-    return { created: ids.length * lesson.assignments.length };
+    return this.prisma.$transaction(async (tx) => {
+      const lesson = await tx.lesson.findUnique({
+        where: { id: lessonId },
+        select: {
+          id: true,
+          createdById: true,
+          assignments: { select: { id: true } },
+        },
+      });
+
+      if (!lesson) throw new NotFoundException('Lesson not found');
+      this.ensureLessonOwner(lesson.createdById, teacherId);
+
+      const assignmentIds = lesson.assignments.map((a) => a.id);
+      if (!assignmentIds.length) return { created: 0 };
+
+      // 1) доступ к группам
+      if (groupIds.length) {
+        const allowed = await tx.groupMember.findMany({
+          where: {
+            groupId: { in: groupIds },
+            userId: teacherId,
+            isActive: true,
+          },
+          select: { groupId: true },
+        });
+
+        const allowedSet = new Set(allowed.map((x) => x.groupId));
+        const forbidden = groupIds.filter((id) => !allowedSet.has(id));
+
+        if (forbidden.length) {
+          throw new ForbiddenException(
+            `You are not a member of groups: ${forbidden.join(', ')}`,
+          );
+        }
+      }
+
+      // 2) студенты из групп
+      const groupMembers = groupIds.length
+        ? await tx.groupMember.findMany({
+            where: {
+              groupId: { in: groupIds },
+              isActive: true,
+              role: { name: 'student', scope: 'GROUP' },
+            },
+            select: { userId: true },
+          })
+        : [];
+
+      // 3) проверка directStudentIds (только "мои" студенты)
+      let allowedDirectStudentIds: number[] = [];
+      if (directStudentIds.length) {
+        const rows = await tx.groupMember.findMany({
+          where: {
+            userId: { in: directStudentIds },
+            isActive: true,
+            role: { name: 'student', scope: 'GROUP' },
+            group: {
+              members: {
+                some: { userId: teacherId, isActive: true },
+              },
+            },
+          },
+          select: { userId: true },
+        });
+
+        allowedDirectStudentIds = Array.from(
+          new Set(rows.map((r) => r.userId)),
+        );
+
+        const allowedSet = new Set(allowedDirectStudentIds);
+        const invalid = directStudentIds.filter((id) => !allowedSet.has(id));
+
+        if (invalid.length) {
+          throw new ForbiddenException(
+            `You cannot assign to these students: ${invalid.join(', ')}`,
+          );
+        }
+      }
+
+      // 4) финальный список юзеров
+      const targetUserIds = new Set<number>();
+      for (const id of allowedDirectStudentIds) targetUserIds.add(id);
+      for (const m of groupMembers) targetUserIds.add(m.userId);
+
+      targetUserIds.delete(teacherId);
+
+      const userIds = Array.from(targetUserIds);
+      if (!userIds.length) return { created: 0 };
+
+      // 5) создаём назначения
+      const data: Prisma.StudentAssignmentCreateManyInput[] = userIds.flatMap(
+        (userId) =>
+          assignmentIds.map((assignmentId) => ({
+            userId,
+            assignmentId,
+          })),
+      );
+
+      const createdStudentAssignments = await tx.studentAssignment.createMany({
+        data,
+        skipDuplicates: true,
+      });
+
+      // 6) связь урока с группами
+      if (groupIds.length) {
+        await tx.groupLesson.createMany({
+          data: groupIds.map((groupId) => ({ groupId, lessonId })),
+          skipDuplicates: true,
+        });
+      }
+
+      return {
+        created: createdStudentAssignments.count,
+        usersTargeted: userIds.length,
+        assignmentsTargeted: assignmentIds.length,
+      };
+    });
   }
 }
