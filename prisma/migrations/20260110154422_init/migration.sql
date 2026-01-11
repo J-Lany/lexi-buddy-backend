@@ -1,5 +1,5 @@
 -- CreateEnum
-CREATE TYPE "AgeGroup" AS ENUM ('UNDER_18', 'BETWEEN_18_35', 'OVER_35');
+CREATE TYPE "AgeGroup" AS ENUM ('child', 'teenager', 'adult');
 
 -- CreateEnum
 CREATE TYPE "Level" AS ENUM ('A1', 'A2', 'B1', 'B2', 'C1', 'C2');

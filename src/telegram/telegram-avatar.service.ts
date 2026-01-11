@@ -16,8 +16,6 @@ export class TelegramAvatarService {
   async saveTelegramAvatarByTelegramId(
     telegramId: number,
   ): Promise<string | null> {
-    console.log('[TG AVATAR] start', { telegramId });
-
     try {
       const fileUrl = await this.telegramApi.getUserAvatarFileUrl(telegramId);
 

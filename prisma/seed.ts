@@ -176,7 +176,7 @@ async function seedTestData() {
       firstName: 'Пётр',
       lastName: 'Петров',
       level: Level.A1,
-      ageGroup: AgeGroup.BETWEEN_18_35,
+      ageGroup: AgeGroup.child,
       telegramId: '111111111',
     },
     {
@@ -185,7 +185,7 @@ async function seedTestData() {
       firstName: 'Мария',
       lastName: 'Сидорова',
       level: Level.C1,
-      ageGroup: AgeGroup.UNDER_18,
+      ageGroup: AgeGroup.teenager,
       telegramId: '222222222',
     },
   ] as const;

@@ -1,4 +1,12 @@
-import { Controller, Get, UseGuards, Query, Param } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  UseGuards,
+  Query,
+  Param,
+  Body,
+} from '@nestjs/common';
 import {
   ApiOperation,
   ApiTags,
@@ -9,6 +17,7 @@ import { StudentsService } from './students.service';
 import { CurrentUser } from 'auth/decorators/current-user.decorator';
 import { JwtPayload } from 'auth/types/jwt-payload.type';
 import { JwtAuthGuard } from 'auth/guards/jwt-auth.guard';
+import { UpdateStudentDto } from './dto/update-student.dto';
 
 @ApiTags('students')
 @ApiBearerAuth()
@@ -49,5 +58,19 @@ export class StudentsController {
     const studentId = Number(id);
 
     return this.studentsService.getStudentDashboard(teacherId, studentId);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update student profile (for current teacher)' })
+  @ApiOkResponse({ description: 'Updated student profile' })
+  async updateStudent(
+    @Param('id') id: string,
+    @Body() dto: UpdateStudentDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const teacherId = user.sub;
+    const studentId = Number(id);
+
+    return this.studentsService.updateStudentProfile(teacherId, studentId, dto);
   }
 }

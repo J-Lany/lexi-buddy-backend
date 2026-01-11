@@ -12,7 +12,6 @@ export class GroupRepository {
 
     return this.prisma.user.findMany({
       where: {
-        // пользователь — студент в какой-то группе
         groupMemberships: {
           some: {
             isActive: true,
@@ -213,7 +212,6 @@ export class GroupRepository {
         isActive: true,
         role: {
           name: 'student',
-          // scope: 'GROUP',
         },
       },
     });
@@ -224,12 +222,25 @@ export class GroupRepository {
     studentId: number,
     studentRoleId: number,
   ) {
-    return this.prisma.groupMember.create({
-      data: {
+    return this.prisma.groupMember.upsert({
+      where: {
+        groupId_userId: {
+          groupId,
+          userId: studentId,
+        },
+      },
+      create: {
         groupId,
         userId: studentId,
         roleId: studentRoleId,
         isActive: true,
+        removedAt: null,
+      },
+      update: {
+        roleId: studentRoleId,
+        isActive: true,
+        removedAt: null,
+        joinedAt: new Date(),
       },
       select: {
         user: {
@@ -301,6 +312,7 @@ export class GroupRepository {
             firstName: true,
             lastName: true,
             username: true,
+            avatarUrl: true,
             level: true,
             contacts: {
               select: {

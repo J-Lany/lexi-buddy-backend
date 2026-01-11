@@ -9,6 +9,7 @@ import { UserRepository } from 'repositories/user.repository';
 import { StudentsRepository } from 'repositories/student-repository';
 import { round1 } from 'common/utils/round';
 import { DONE_STATUSES } from 'common/constants/student-assignment';
+import { UpdateStudentDto } from './dto/update-student.dto';
 
 @Injectable()
 export class StudentsService {
@@ -197,6 +198,7 @@ export class StudentsService {
         level: data.student.level,
         ageGroup: data.student.ageGroup,
         lastVisit: data.student.lastVisit,
+        avatarUrl: data.student.avatarUrl,
         createdAt: data.student.createdAt,
         telegramValue:
           data.student.contacts.find((c) => c.contactType.name === 'telegram')
@@ -218,5 +220,20 @@ export class StudentsService {
       },
       lessons: lessonsDto,
     };
+  }
+  async updateStudentProfile(
+    teacherId: number,
+    studentId: number,
+    dto: UpdateStudentDto,
+  ) {
+    const canSee = await this.groupRepo.teacherHasStudent(teacherId, studentId);
+    if (!canSee) {
+      throw new ForbiddenException('No access to this student');
+    }
+
+    const ok = await this.studentsRepo.updateStudentProfile(studentId, dto);
+    if (!ok) throw new NotFoundException('Student not found');
+
+    return { ok: true };
   }
 }

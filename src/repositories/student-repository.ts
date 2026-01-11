@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class StudentsRepository {
@@ -44,6 +45,7 @@ export class StudentsRepository {
         lastName: true,
         level: true,
         ageGroup: true,
+        avatarUrl: true,
         lastVisit: true,
         createdAt: true,
         contacts: {
@@ -112,5 +114,17 @@ export class StudentsRepository {
       lessons,
       studentAssignments,
     };
+  }
+
+  async updateStudentProfile(
+    studentId: number,
+    data: Prisma.UserUpdateInput,
+  ): Promise<boolean> {
+    const res = await this.prisma.user.updateMany({
+      where: { id: studentId },
+      data,
+    });
+
+    return res.count > 0;
   }
 }

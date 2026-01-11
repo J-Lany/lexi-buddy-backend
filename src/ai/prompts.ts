@@ -1,8 +1,8 @@
 export type LevelCode = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
-export type AgeGroupCode = 'UNDER_18' | 'BETWEEN_18_35' | 'OVER_35';
+export type AgeGroupCode = 'child' | 'teenager' | 'adult';
 
 type TrainingLevel = 'beginner' | 'intermediate' | 'advanced';
-type TrainingAgeGroup = 'child' | 'teen' | 'adult';
+type TrainingAgeGroup = 'child' | 'teenager' | 'adult';
 
 export type TrainingTypeKey =
   | 'definition_quiz'
@@ -21,17 +21,6 @@ export function mapLevelToTraining(
   return undefined;
 }
 
-export function mapAgeGroupToTraining(
-  ageGroup?: string | null,
-): TrainingAgeGroup | undefined {
-  if (!ageGroup) return undefined;
-  const a = ageGroup as AgeGroupCode;
-  if (a === 'UNDER_18') return 'teen';
-  if (a === 'BETWEEN_18_35') return 'adult';
-  if (a === 'OVER_35') return 'adult';
-  return undefined;
-}
-
 export const trainingPrompts: Record<
   TrainingLevel,
   Record<TrainingAgeGroup, string>
@@ -39,21 +28,24 @@ export const trainingPrompts: Record<
   beginner: {
     child:
       'I am a child and a beginner-level student of English. Use only simple, short sentences and clear language appropriate for kids. Choose topics and examples relevant and interesting for children.',
-    teen: 'I am a teenager and a beginner-level student of English. Use simple, short sentences and clear language. Choose topics and examples relevant and interesting for teenagers.',
+    teenager:
+      'I am a teenager and a beginner-level student of English. Use simple, short sentences and clear language. Choose topics and examples relevant and interesting for teenagers.',
     adult:
       'I am an adult and a beginner-level student of English. Use simple, short sentences and clear language. Choose topics and examples relevant and interesting for adults.',
   },
   intermediate: {
     child:
       'I am a child and an intermediate-level student of English. Use clear language and vocabulary around intermediate level, appropriate for kids. Choose topics and examples relevant and interesting for children.',
-    teen: 'I am a teenager and an intermediate-level student of English. Use modern, clear English at intermediate level. Choose topics and examples relevant and interesting for teenagers.',
+    teenager:
+      'I am a teenager and an intermediate-level student of English. Use modern, clear English at intermediate level. Choose topics and examples relevant and interesting for teenagers.',
     adult:
       'I am an adult and an intermediate-level student of English. Use modern, clear English at intermediate level. Choose topics and examples relevant and interesting for adults.',
   },
   advanced: {
     child:
       'I am a child and an advanced-level student of English. Use diverse but still clear language appropriate for kids. Choose topics and examples relevant and interesting for children.',
-    teen: 'I am a teenager and an advanced-level student of English. Use diverse, sophisticated, but clear and modern English. Choose topics and examples relevant and interesting for teenagers.',
+    teenager:
+      'I am a teenager and an advanced-level student of English. Use diverse, sophisticated, but clear and modern English. Choose topics and examples relevant and interesting for teenagers.',
     adult:
       'I am an adult and an advanced-level student of English. Use diverse, sophisticated, but clear and modern English. Choose topics and examples relevant and interesting for adults.',
   },
@@ -64,7 +56,7 @@ export function getTrainingPrompt(params: {
   ageGroup?: string | null;
 }): string | undefined {
   const trainingLevel = mapLevelToTraining(params.level);
-  const trainingAgeGroup = mapAgeGroupToTraining(params.ageGroup);
+  const trainingAgeGroup = params.ageGroup as AgeGroupCode;
 
   if (!trainingLevel || !trainingAgeGroup) return undefined;
 

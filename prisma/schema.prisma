@@ -17,9 +17,9 @@ datasource db {
 // ---------- ENUMS ----------
 
 enum AgeGroup {
-  UNDER_18
-  BETWEEN_18_35
-  OVER_35
+  child
+  teenager
+  adult
 }
 
 enum Level {
@@ -311,13 +311,17 @@ model StudentAssignment {
   assignment Assignment @relation(fields: [assignmentId], references: [id])
 
   results Result[]
+
+  @@unique([userId, assignmentId])
+  @@index([userId])
+  @@index([assignmentId])
 }
 
 model Result {
   id                  Int      @id @default(autoincrement())
   studentAssignmentId Int
   questionId          Int
-  answer              Json? // текст или JSONB — ответ студента
+  answer              Json? 
   isCorrect           Boolean?
   responseTimeMs      Int?
   createdAt           DateTime @default(now())
