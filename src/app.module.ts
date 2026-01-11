@@ -10,6 +10,7 @@ import { GroupsModule } from 'groups/groups.module';
 import { TeacherRequestsModule } from 'teacher-requests/teacher-requests.module';
 import { TelegramNotificationsModule } from 'notifications/telegram-notifications.module';
 import { LessonsModule } from 'lessons/lessons.module';
+import { StudentBotInternalModule } from 'student-bot-internal/student-bot-internal.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { LessonsModule } from 'lessons/lessons.module';
     GroupsModule,
     TeacherRequestsModule,
     TelegramNotificationsModule,
+    StudentBotInternalModule,
     LessonsModule,
     ConfigModule.forRoot({
       isGlobal: true,
