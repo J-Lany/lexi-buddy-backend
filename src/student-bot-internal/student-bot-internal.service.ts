@@ -27,4 +27,23 @@ export class StudentBotInternalService {
 
     return profile;
   }
+
+  async getLessonAssignmentsByTelegramId(telegramId: number, lessonId: number) {
+    const studentId = await this.repo.findStudentIdByTelegramId(telegramId);
+    if (!studentId) throw new NotFoundException('Student not found');
+
+    const items = await this.repo.findAssignmentsForStudentInLesson(
+      studentId,
+      lessonId,
+    );
+
+    return {
+      items: items.map((a) => ({
+        assignmentId: a.assignmentId,
+        type: a.typeName,
+        status: a.status,
+        score: a.score ?? null,
+      })),
+    };
+  }
 }

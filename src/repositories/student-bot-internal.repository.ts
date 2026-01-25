@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
+import { StudentAssignmentStatus } from '@prisma/client';
 
 @Injectable()
 export class StudentBotInternalRepository {
@@ -85,5 +86,31 @@ export class StudentBotInternalRepository {
       ageGroup: user.ageGroup ?? null,
       groupsCount: user.groupMemberships?.length ?? 0,
     };
+  }
+
+  async findAssignmentsForStudentInLesson(userId: number, lessonId: number) {
+    const assignments = await this.prisma.assignment.findMany({
+      where: { lessonId },
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        type: { select: { name: true } },
+        studentAssignments: {
+          where: { userId },
+          select: { status: true, score: true },
+          take: 1,
+        },
+      },
+    });
+
+    return assignments.map((a) => {
+      const sa = a.studentAssignments[0];
+      return {
+        assignmentId: a.id,
+        typeName: a.type.name,
+        status: sa?.status ?? StudentAssignmentStatus.PENDING,
+        score: sa?.score ?? null,
+      };
+    });
   }
 }

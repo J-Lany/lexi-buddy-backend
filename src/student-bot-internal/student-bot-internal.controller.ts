@@ -25,4 +25,12 @@ export class StudentBotInternalController {
   async getProfile(@Query('telegramId', ParseIntPipe) telegramId: number) {
     return this.service.getStudentProfileByTelegramId(telegramId);
   }
+
+  @Get('lesson/assignments')
+  async getLessonAssignments(
+    @Query('telegramId', ParseIntPipe) telegramId: number,
+    @Query('lessonId', ParseIntPipe) lessonId: number,
+  ) {
+    return this.service.getLessonAssignmentsByTelegramId(telegramId, lessonId);
+  }
 }
