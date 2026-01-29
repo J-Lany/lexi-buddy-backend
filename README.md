@@ -120,3 +120,5 @@ npx prisma db seed - создает тестовые данные
 rm -rf prisma/migrations
 npx prisma migrate reset
 npx prisma migrate dev --name init
+
+//TO DO npx prisma migrate dev --name student_assignment_attempts
