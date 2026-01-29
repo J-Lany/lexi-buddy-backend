@@ -302,19 +302,25 @@ model StudentAssignment {
   id           Int                     @id @default(autoincrement())
   userId       Int
   assignmentId Int
+
+  attemptNo Int @default(1) 
+
   status       StudentAssignmentStatus @default(PENDING)
   score        Float?
-  submittedAt  DateTime?
-  gradedAt     DateTime?
+
+  startedAt   DateTime? 
+  submittedAt DateTime? 
+  gradedAt    DateTime?
 
   user       User       @relation(fields: [userId], references: [id])
   assignment Assignment @relation(fields: [assignmentId], references: [id])
 
   results Result[]
 
-  @@unique([userId, assignmentId])
+  @@unique([userId, assignmentId, attemptNo])
   @@index([userId])
   @@index([assignmentId])
+  @@index([userId, assignmentId])
 }
 
 model Result {
