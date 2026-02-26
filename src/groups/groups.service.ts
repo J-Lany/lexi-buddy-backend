@@ -180,7 +180,10 @@ export class GroupsService {
     const doneCountByLessonStudent = new Map<string, number>();
 
     for (const sa of raw.studentAssignments) {
-      if (!DONE_STATUSES.includes(sa.status)) continue;
+      const status = sa.status;
+      if (!status) continue;
+
+      if (!DONE_STATUSES.includes(status)) continue;
 
       const lessonId = assignmentToLessonId.get(sa.assignmentId);
       if (!lessonId) continue;

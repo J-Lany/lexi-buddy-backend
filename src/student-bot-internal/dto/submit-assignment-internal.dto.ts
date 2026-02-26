@@ -44,7 +44,7 @@ export class SubmitAssignmentInternalDto {
   telegramId!: number;
 
   @IsInt()
-  studentAssignmentId!: number;
+  attemptId!: number;
 
   @IsArray()
   @ArrayMinSize(1)

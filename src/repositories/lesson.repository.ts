@@ -18,7 +18,9 @@ export class LessonRepository {
         assignments: {
           include: {
             type: true,
-            studentAssignments: {
+
+            assignedAssignments: {
+              where: { revokedAt: null },
               include: {
                 user: {
                   select: {
@@ -30,8 +32,22 @@ export class LessonRepository {
                     lastVisit: true,
                   },
                 },
+                attempts: {
+                  orderBy: { attemptNo: 'desc' },
+                  take: 1,
+                  select: {
+                    id: true,
+                    attemptNo: true,
+                    status: true,
+                    score: true,
+                    startedAt: true,
+                    submittedAt: true,
+                    gradedAt: true,
+                  },
+                },
               },
             },
+
             questions: {
               include: {
                 answers: true,

@@ -1,4 +1,4 @@
-import { AgeGroup, Level, StudentAssignmentStatus } from '@prisma/client';
+import { AgeGroup, Level, StudentAttemptStatus } from '@prisma/client';
 
 export type InternalAssignmentQuestionAnswerDto = {
   id: number;
@@ -28,9 +28,9 @@ export type InternalAssignmentDto = {
 };
 
 export type InternalStartAssignmentResponseDto = {
-  studentAssignmentId: number;
+  attemptId: number;
   attemptNo: number;
-  status: StudentAssignmentStatus;
+  status: StudentAttemptStatus;
   attemptsPolicy: {
     maxAttempts: number;
     showCorrectOnAttempt: number;
