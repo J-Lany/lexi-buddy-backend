@@ -43,8 +43,8 @@ enum GroupInviteStatus {
   EXPIRED
 }
 
-enum StudentAssignmentStatus {
-  PENDING
+enum StudentAttemptStatus {
+  IN_PROGRESS
   COMPLETED
   GRADED
 }
@@ -64,7 +64,6 @@ model User {
   verified         Boolean @default(false)
   refreshTokenHash String?
 
-  // глобальная роль
   role   Role @relation(fields: [roleId], references: [id])
   roleId Int
 
@@ -88,9 +87,9 @@ model User {
   sentGroupInvites     GroupInvite[] @relation("GroupInviteInviter")
   receivedGroupInvites GroupInvite[] @relation("GroupInviteInvitee")
 
-  createdLessons     Lesson[]            @relation("LessonCreator")
-  studentAssignments StudentAssignment[]
-  notifications      Notification[]
+  createdLessons             Lesson[]                    @relation("LessonCreator")
+  notifications              Notification[]
+  studentAssignedAssignments StudentAssignedAssignment[]
 }
 
 model Role {
@@ -142,13 +141,13 @@ model Group {
   id          Int      @id @default(autoincrement())
   name        String
   description String?
-  level     Level?
+  level       Level?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   archived    Boolean  @default(false)
 
-  members GroupMember[]
-  invites GroupInvite[]
+  members      GroupMember[]
+  invites      GroupInvite[]
   groupLessons GroupLesson[]
 }
 
@@ -211,7 +210,7 @@ model Lesson {
 }
 
 model GroupLesson {
-  id       Int  @id @default(autoincrement())
+  id       Int @id @default(autoincrement())
   groupId  Int
   lessonId Int
 
@@ -228,7 +227,7 @@ model LessonVocab {
   lessonId    Int
   term        String
   translation String?
-  synonyms    Json? 
+  synonyms    Json?
   createdAt   DateTime @default(now())
 
   lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
@@ -256,8 +255,8 @@ model Assignment {
   lesson Lesson         @relation(fields: [lessonId], references: [id])
   type   AssignmentType @relation(fields: [typeId], references: [id])
 
-  questions          AssignmentQuestion[]
-  studentAssignments StudentAssignment[]
+  questions           AssignmentQuestion[]
+  assignedAssignments StudentAssignedAssignment[]
 }
 
 model AssignmentQuestionType {
@@ -279,7 +278,7 @@ model AssignmentQuestion {
 
   assignment   Assignment             @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
   questionType AssignmentQuestionType @relation(fields: [questionTypeId], references: [id])
-  explanation    String? 
+  explanation  String?
 
   answers AssignmentAnswer[]
   results Result[]
@@ -298,44 +297,57 @@ model AssignmentAnswer {
 
 // ---------- STUDENT WORK ----------
 
-model StudentAssignment {
-  id           Int                     @id @default(autoincrement())
+model StudentAssignedAssignment {
+  id           Int @id @default(autoincrement())
   userId       Int
   assignmentId Int
 
-  attemptNo Int @default(1) 
+  assignedAt DateTime  @default(now())
+  revokedAt  DateTime?
 
-  status       StudentAssignmentStatus @default(PENDING)
-  score        Float?
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
 
-  startedAt   DateTime? 
-  submittedAt DateTime? 
+  attempts StudentAssignmentAttempt[]
+
+  @@unique([userId, assignmentId])
+  @@index([userId])
+  @@index([assignmentId])
+}
+
+model StudentAssignmentAttempt {
+  id         Int @id @default(autoincrement())
+  assignedId Int
+  attemptNo  Int
+
+  status StudentAttemptStatus @default(IN_PROGRESS)
+  score  Float?
+
+  startedAt   DateTime  @default(now())
+  submittedAt DateTime?
   gradedAt    DateTime?
 
-  user       User       @relation(fields: [userId], references: [id])
-  assignment Assignment @relation(fields: [assignmentId], references: [id])
+  assigned StudentAssignedAssignment @relation(fields: [assignedId], references: [id], onDelete: Cascade)
 
   results Result[]
 
-  @@unique([userId, assignmentId, attemptNo])
-  @@index([userId])
-  @@index([assignmentId])
-  @@index([userId, assignmentId])
+  @@unique([assignedId, attemptNo])
+  @@index([assignedId])
 }
 
 model Result {
-  id                  Int      @id @default(autoincrement())
-  studentAssignmentId Int
-  questionId          Int
-  answer              Json? 
-  isCorrect           Boolean?
-  responseTimeMs      Int?
-  createdAt           DateTime @default(now())
+  id             Int      @id @default(autoincrement())
+  attemptId      Int
+  questionId     Int
+  answer         Json?
+  isCorrect      Boolean?
+  responseTimeMs Int?
+  createdAt      DateTime @default(now())
 
-  studentAssignment StudentAssignment  @relation(fields: [studentAssignmentId], references: [id], onDelete: Cascade)
-  question          AssignmentQuestion @relation(fields: [questionId], references: [id])
+  attempt  StudentAssignmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question AssignmentQuestion       @relation(fields: [questionId], references: [id])
 
-  @@index([studentAssignmentId])
+  @@index([attemptId])
   @@index([questionId])
 }
 

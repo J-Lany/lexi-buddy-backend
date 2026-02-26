@@ -1,11 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from 'prisma/prisma.service';
-import { StudentAssignmentStatus } from '@prisma/client';
+import { StudentAttemptStatus } from '@prisma/client';
 
 type SaveAttemptInput = {
   userId: number;
-  studentAssignmentId: number;
+  attemptId: number;
   clientSessionId: string | null;
   results: Array<{
     questionId: number;
@@ -39,15 +38,13 @@ export class StudentBotInternalRepository {
   }
 
   async findLessonsForStudent(studentId: number) {
-    const lessons = await this.prisma.lesson.findMany({
+    return this.prisma.lesson.findMany({
       where: {
         archived: false,
         assignments: {
           some: {
-            studentAssignments: {
-              some: {
-                userId: studentId,
-              },
+            assignedAssignments: {
+              some: { userId: studentId, revokedAt: null },
             },
           },
         },
@@ -61,8 +58,6 @@ export class StudentBotInternalRepository {
       },
       orderBy: { createdAt: 'desc' },
     });
-
-    return lessons;
   }
 
   async findStudentProfileByTelegramId(telegramId: number) {
@@ -105,28 +100,37 @@ export class StudentBotInternalRepository {
   }
 
   async findAssignmentsForStudentInLesson(userId: number, lessonId: number) {
-    const assignments = await this.prisma.assignment.findMany({
-      where: { lessonId },
-      orderBy: { id: 'asc' },
+    const rows = await this.prisma.studentAssignedAssignment.findMany({
+      where: {
+        userId,
+        revokedAt: null,
+        assignment: {
+          lessonId,
+        },
+      },
+      orderBy: { assignmentId: 'asc' },
       select: {
-        id: true,
-        type: { select: { name: true } },
-        studentAssignments: {
-          where: { userId },
+        assignmentId: true,
+        assignment: {
+          select: {
+            type: { select: { name: true } },
+          },
+        },
+        attempts: {
           orderBy: { attemptNo: 'desc' },
-          select: { status: true, score: true },
           take: 1,
+          select: { status: true, score: true },
         },
       },
     });
 
-    return assignments.map((a) => {
-      const sa = a.studentAssignments[0];
+    return rows.map((r) => {
+      const last = r.attempts?.[0] ?? null;
       return {
-        assignmentId: a.id,
-        typeName: a.type.name,
-        status: sa?.status ?? StudentAssignmentStatus.PENDING,
-        score: sa?.score ?? null,
+        assignmentId: r.assignmentId,
+        typeName: r.assignment.type.name,
+        status: last?.status ?? null,
+        score: last?.score ?? null,
       };
     });
   }
@@ -192,74 +196,95 @@ export class StudentBotInternalRepository {
     const payload = await this.getAssignmentPayload(assignmentId);
     if (!payload) return null;
 
-    for (let i = 0; i < 2; i++) {
-      const last = await this.prisma.studentAssignment.findFirst({
-        where: { userId, assignmentId },
-        orderBy: { attemptNo: 'desc' },
-        select: { attemptNo: true },
-      });
+    const assigned = await this.prisma.studentAssignedAssignment.findFirst({
+      where: { userId, assignmentId, revokedAt: null },
+      select: { id: true },
+    });
 
-      const nextAttemptNo = (last?.attemptNo ?? 0) + 1;
+    if (!assigned) return null;
 
-      try {
-        const studentAssignment = await this.prisma.studentAssignment.create({
-          data: {
-            userId,
-            assignmentId,
-            attemptNo: nextAttemptNo,
-            startedAt: new Date(),
-            status: StudentAssignmentStatus.PENDING,
-          },
-          select: { id: true, attemptNo: true, status: true },
-        });
+    const last = await this.prisma.studentAssignmentAttempt.findFirst({
+      where: { assignedId: assigned.id },
+      orderBy: { attemptNo: 'desc' },
+      select: {
+        id: true,
+        attemptNo: true,
+        status: true,
+        submittedAt: true,
+      },
+    });
 
-        return { studentAssignment, assignment: payload };
-      } catch (e) {
-        if (
-          e instanceof Prisma.PrismaClientKnownRequestError &&
-          e.code === 'P2002'
-        ) {
-          if (i === 0) continue;
-        }
-        throw e;
-      }
+    if (
+      last &&
+      last.status === StudentAttemptStatus.IN_PROGRESS &&
+      last.submittedAt === null
+    ) {
+      return {
+        studentAssignment: {
+          id: last.id,
+          attemptNo: last.attemptNo,
+          status: last.status,
+        },
+        assignment: payload,
+      };
     }
 
-    return null;
+    const nextAttemptNo = (last?.attemptNo ?? 0) + 1;
+
+    const created = await this.prisma.studentAssignmentAttempt.create({
+      data: {
+        assignedId: assigned.id,
+        attemptNo: nextAttemptNo,
+        status: StudentAttemptStatus.IN_PROGRESS,
+        startedAt: new Date(),
+      },
+      select: { id: true, attemptNo: true, status: true },
+    });
+
+    return { studentAssignment: created, assignment: payload };
   }
 
   async saveAttemptResultsAndComplete(input: SaveAttemptInput) {
-    const { userId, studentAssignmentId, results, clientSessionId } = input;
+    const { userId, attemptId, results, clientSessionId } = input;
 
-    // 1) Забираем попытку + статус (нужно для идемпотентности)
-    const attempt = await this.prisma.studentAssignment.findFirst({
-      where: { id: studentAssignmentId, userId },
+    const attempt = await this.prisma.studentAssignmentAttempt.findFirst({
+      where: {
+        id: attemptId,
+        assigned: { userId },
+      },
       select: {
         id: true,
-        assignmentId: true,
         status: true,
         score: true,
+        assigned: {
+          select: {
+            assignmentId: true,
+          },
+        },
       },
     });
+
     if (!attempt) return null;
 
-    // 2) Идемпотентность: если уже completed — возвращаем сохранённое, ничего не трогаем
-    if (attempt.status === StudentAssignmentStatus.COMPLETED) {
+    if (
+      attempt.status === StudentAttemptStatus.COMPLETED ||
+      attempt.status === StudentAttemptStatus.GRADED
+    ) {
       const savedAttempts = await this.prisma.result.count({
-        where: { studentAssignmentId: attempt.id },
+        where: { attemptId: attempt.id },
       });
 
       return {
         ok: true,
-        studentAssignmentId: attempt.id,
+        attemptId: attempt.id,
         savedAttempts,
         score: attempt.score ?? null,
-        status: StudentAssignmentStatus.COMPLETED,
+        status: StudentAttemptStatus.COMPLETED,
       };
     }
 
     const assignment = await this.prisma.assignment.findUnique({
-      where: { id: attempt.assignmentId },
+      where: { id: attempt.assigned.assignmentId },
       select: {
         questions: {
           select: {
@@ -274,12 +299,11 @@ export class StudentBotInternalRepository {
     const allowedQuestions = assignment.questions;
     const allowedQuestionIds = new Set(allowedQuestions.map((q) => q.id));
 
-    // 3) Политика попыток (сейчас 3 как в сервисе, но не захардкожено в DTO)
     const maxAttempts = 3;
     const policyTypes = new Set(['gap_fill', 'open_text']);
 
     const rows: Array<{
-      studentAssignmentId: number;
+      attemptId: number;
       questionId: number;
       answer: any;
       isCorrect?: boolean | null;
@@ -298,7 +322,6 @@ export class StudentBotInternalRepository {
       const qType = qMeta?.questionType.name ?? null;
 
       for (const att of qr.attempts) {
-        // мягкая защита по policy
         const limit = qType && policyTypes.has(qType) ? maxAttempts : 1;
         if (
           !Number.isFinite(att.attempt) ||
@@ -309,7 +332,7 @@ export class StudentBotInternalRepository {
         }
 
         rows.push({
-          studentAssignmentId: attempt.id,
+          attemptId: attempt.id,
           questionId: qr.questionId,
           answer: {
             attempt: att.attempt,
@@ -333,7 +356,6 @@ export class StudentBotInternalRepository {
       }
     }
 
-    // 4) Score считаем по последним попыткам, как было
     const totalQuestions = allowedQuestions.length;
 
     const canScore =
@@ -349,20 +371,19 @@ export class StudentBotInternalRepository {
     const score =
       canScore && totalQuestions > 0 ? correctCount / totalQuestions : null;
 
-    // 5) Важно: атомарно. И главное — при ретраях после успеха мы сюда уже не попадём (см. статус COMPLETED выше)
     await this.prisma.$transaction(async (tx) => {
       await tx.result.deleteMany({
-        where: { studentAssignmentId: attempt.id },
+        where: { attemptId: attempt.id },
       });
 
       if (rows.length > 0) {
         await tx.result.createMany({ data: rows });
       }
 
-      await tx.studentAssignment.update({
+      await tx.studentAssignmentAttempt.update({
         where: { id: attempt.id },
         data: {
-          status: StudentAssignmentStatus.COMPLETED,
+          status: StudentAttemptStatus.COMPLETED,
           score: score ?? undefined,
           submittedAt: new Date(),
         },
@@ -371,10 +392,10 @@ export class StudentBotInternalRepository {
 
     return {
       ok: true,
-      studentAssignmentId: attempt.id,
+      attemptId: attempt.id,
       savedAttempts: rows.length,
       score,
-      status: StudentAssignmentStatus.COMPLETED,
+      status: StudentAttemptStatus.COMPLETED,
     };
   }
 }

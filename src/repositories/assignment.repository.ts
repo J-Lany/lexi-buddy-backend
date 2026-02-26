@@ -43,7 +43,6 @@ export class AssignmentRepository {
     });
   }
 
-  /** AssignmentType по name (строка-ключ, которую ты передаёшь с фронта) */
   async findAssignmentTypeByName(name: string) {
     return this.prisma.assignmentType.findUnique({
       where: { name },

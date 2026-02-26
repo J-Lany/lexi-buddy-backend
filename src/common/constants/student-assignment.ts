@@ -1,3 +1,6 @@
-import { StudentAssignmentStatus } from '@prisma/client';
+import { StudentAttemptStatus } from '@prisma/client';
 
-export const DONE_STATUSES: StudentAssignmentStatus[] = ['COMPLETED', 'GRADED'];
+export const DONE_STATUSES: StudentAttemptStatus[] = [
+  StudentAttemptStatus.COMPLETED,
+  StudentAttemptStatus.GRADED,
+];

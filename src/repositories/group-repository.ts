@@ -343,9 +343,7 @@ export class GroupRepository {
         level: true,
         createdAt: true,
         assignments: {
-          select: {
-            id: true,
-          },
+          select: { id: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -355,20 +353,31 @@ export class GroupRepository {
       l.assignments.map((a) => a.id),
     );
 
-    const studentAssignments =
+    const assignedRows =
       studentIds.length && assignmentIds.length
-        ? await this.prisma.studentAssignment.findMany({
+        ? await this.prisma.studentAssignedAssignment.findMany({
             where: {
               userId: { in: studentIds },
               assignmentId: { in: assignmentIds },
+              revokedAt: null,
             },
             select: {
               userId: true,
               assignmentId: true,
-              status: true,
+              attempts: {
+                orderBy: { attemptNo: 'desc' },
+                take: 1,
+                select: { status: true },
+              },
             },
           })
         : [];
+
+    const studentAssignments = assignedRows.map((r) => ({
+      userId: r.userId,
+      assignmentId: r.assignmentId,
+      status: r.attempts?.[0]?.status ?? null,
+    }));
 
     return {
       group,

@@ -6,6 +6,7 @@ import {
   Query,
   Param,
   Body,
+  ParseIntPipe,
 } from '@nestjs/common';
 import {
   ApiOperation,
@@ -51,13 +52,31 @@ export class StudentsController {
   @ApiOperation({ summary: 'Get student dashboard (for current teacher)' })
   @ApiOkResponse({ description: 'Student profile + lessons progress' })
   async getStudentDashboard(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) studentId: number,
     @CurrentUser() user: JwtPayload,
   ) {
     const teacherId = user.sub;
-    const studentId = Number(id);
-
     return this.studentsService.getStudentDashboard(teacherId, studentId);
+  }
+
+  @Get(':id/lessons/:lessonId/progress')
+  @ApiOperation({ summary: 'Get student progress for a specific lesson' })
+  @ApiOkResponse({
+    description: 'Student lesson progress with attempts & answers',
+  })
+  async getStudentLessonProgress(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('lessonId', ParseIntPipe) lessonId: number,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const teacherId = user.sub;
+    const studentId = id;
+
+    return this.studentsService.getStudentLessonProgress(
+      teacherId,
+      studentId,
+      lessonId,
+    );
   }
 
   @Patch(':id')

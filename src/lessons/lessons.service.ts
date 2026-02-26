@@ -19,7 +19,7 @@ import { AssignLessonDto } from './dto/assign-lesson.dto';
 import { TrainingTypeKey } from 'ai/prompts';
 import { LessonSummaryDto } from './dto/lesson-summary.dto';
 import { LessonDetailsDto } from './dto/lesson-details.dto';
-import { StudentAssignmentStatus } from '@prisma/client';
+import { DONE_STATUSES } from 'common/constants/student-assignment';
 
 @Injectable()
 export class LessonsService {
@@ -90,7 +90,7 @@ export class LessonsService {
       }
     }
 
-    return this.lessonRepo.findById(lesson.id);
+    return { lessonId: lesson.id };
   }
 
   private ensureLessonOwner(lessonCreatorId: number, teacherId: number) {
@@ -133,27 +133,25 @@ export class LessonsService {
     >();
 
     for (const assignment of lesson.assignments) {
-      for (const sa of assignment.studentAssignments) {
-        if (!sa.user) continue;
+      for (const aa of assignment.assignedAssignments ?? []) {
+        if (!aa.user) continue;
 
-        const existing = studentsMap.get(sa.user.id) ?? {
-          id: sa.user.id,
-          username: sa.user.username,
-          avatarUrl: sa.user.avatarUrl,
-          firstName: sa.user.firstName,
-          lastName: sa.user.lastName,
-          lastVisit: sa.user.lastVisit,
+        const existing = studentsMap.get(aa.user.id) ?? {
+          id: aa.user.id,
+          username: aa.user.username,
+          avatarUrl: aa.user.avatarUrl,
+          firstName: aa.user.firstName,
+          lastName: aa.user.lastName,
+          lastVisit: aa.user.lastVisit,
           completedAssignments: 0,
         };
 
-        if (
-          sa.status === StudentAssignmentStatus.COMPLETED ||
-          sa.status === StudentAssignmentStatus.GRADED
-        ) {
+        const lastAttempt = aa.attempts?.[0] ?? null;
+        if (lastAttempt && DONE_STATUSES.includes(lastAttempt.status)) {
           existing.completedAssignments += 1;
         }
 
-        studentsMap.set(sa.user.id, existing);
+        studentsMap.set(aa.user.id, existing);
       }
     }
 
@@ -161,7 +159,7 @@ export class LessonsService {
       const completed = s.completedAssignments;
       const total = totalAssignments || 0;
 
-      let status: LessonStudentStatus = 'NOT_STARTED';
+      let status: LessonStudentStatus;
 
       if (total === 0) {
         status = 'NOT_STARTED';
@@ -343,7 +341,6 @@ export class LessonsService {
       const assignmentIds = lesson.assignments.map((a) => a.id);
       if (!assignmentIds.length) return { created: 0 };
 
-      // 1) доступ к группам
       if (groupIds.length) {
         const allowed = await tx.groupMember.findMany({
           where: {
@@ -364,7 +361,6 @@ export class LessonsService {
         }
       }
 
-      // 2) студенты из групп
       const groupMembers = groupIds.length
         ? await tx.groupMember.findMany({
             where: {
@@ -376,7 +372,6 @@ export class LessonsService {
           })
         : [];
 
-      // 3) проверка directStudentIds (только "мои" студенты)
       let allowedDirectStudentIds: number[] = [];
       if (directStudentIds.length) {
         const rows = await tx.groupMember.findMany({
@@ -407,7 +402,6 @@ export class LessonsService {
         }
       }
 
-      // 4) финальный список юзеров
       const targetUserIds = new Set<number>();
       for (const id of allowedDirectStudentIds) targetUserIds.add(id);
       for (const m of groupMembers) targetUserIds.add(m.userId);
@@ -417,21 +411,17 @@ export class LessonsService {
       const userIds = Array.from(targetUserIds);
       if (!userIds.length) return { created: 0 };
 
-      // 5) создаём назначения
-      const data: Prisma.StudentAssignmentCreateManyInput[] = userIds.flatMap(
-        (userId) =>
-          assignmentIds.map((assignmentId) => ({
-            userId,
-            assignmentId,
-          })),
-      );
+      const data: Prisma.StudentAssignedAssignmentCreateManyInput[] =
+        userIds.flatMap((userId) =>
+          assignmentIds.map((assignmentId) => ({ userId, assignmentId })),
+        );
 
-      const createdStudentAssignments = await tx.studentAssignment.createMany({
-        data,
-        skipDuplicates: true,
-      });
+      const createdStudentAssignments =
+        await tx.studentAssignedAssignment.createMany({
+          data,
+          skipDuplicates: true,
+        });
 
-      // 6) связь урока с группами
       if (groupIds.length) {
         await tx.groupLesson.createMany({
           data: groupIds.map((groupId) => ({ groupId, lessonId })),

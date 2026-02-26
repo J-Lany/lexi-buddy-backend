@@ -62,10 +62,8 @@ export class StudentsRepository {
         archived: false,
         assignments: {
           some: {
-            studentAssignments: {
-              some: {
-                userId: studentId,
-              },
+            assignedAssignments: {
+              some: { userId: studentId, revokedAt: null },
             },
           },
         },
@@ -88,20 +86,34 @@ export class StudentsRepository {
       l.assignments.map((a) => a.id),
     );
 
-    const studentAssignments = assignmentIds.length
-      ? await this.prisma.studentAssignment.findMany({
+    const assignedRows = assignmentIds.length
+      ? await this.prisma.studentAssignedAssignment.findMany({
           where: {
             userId: studentId,
             assignmentId: { in: assignmentIds },
+            revokedAt: null,
           },
           select: {
             assignmentId: true,
-            status: true,
-            score: true,
-            submittedAt: true,
+            attempts: {
+              orderBy: { attemptNo: 'desc' },
+              take: 1,
+              select: {
+                status: true,
+                score: true,
+                submittedAt: true,
+              },
+            },
           },
         })
       : [];
+
+    const studentAssignments = assignedRows.map((r) => ({
+      assignmentId: r.assignmentId,
+      status: r.attempts?.[0]?.status ?? null,
+      score: r.attempts?.[0]?.score ?? null,
+      submittedAt: r.attempts?.[0]?.submittedAt ?? null,
+    }));
 
     return {
       student,
@@ -113,6 +125,107 @@ export class StudentsRepository {
       })),
       lessons,
       studentAssignments,
+    };
+  }
+
+  async getStudentLessonProgressRaw(studentId: number, lessonId: number) {
+    const student = await this.prisma.user.findUnique({
+      where: { id: studentId },
+      select: {
+        id: true,
+        username: true,
+        firstName: true,
+        lastName: true,
+        avatarUrl: true,
+      },
+    });
+
+    const lesson = await this.prisma.lesson.findUnique({
+      where: { id: lessonId },
+      select: {
+        id: true,
+        title: true,
+        createdById: true,
+        archived: true,
+        assignments: {
+          select: {
+            id: true,
+            type: { select: { id: true, name: true } },
+            questions: {
+              select: {
+                id: true,
+                text: true,
+                explanation: true,
+                questionType: { select: { name: true } },
+                answers: { select: { id: true, text: true, isCorrect: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const assignmentIds = lesson?.assignments.map((a) => a.id) ?? [];
+
+    const assignedRows = assignmentIds.length
+      ? await this.prisma.studentAssignedAssignment.findMany({
+          where: {
+            userId: studentId,
+            assignmentId: { in: assignmentIds },
+            revokedAt: null,
+          },
+          select: {
+            assignmentId: true,
+            assignedAt: true,
+            attempts: {
+              orderBy: [{ attemptNo: 'asc' }],
+              select: {
+                id: true,
+                attemptNo: true,
+                status: true,
+                score: true,
+                startedAt: true,
+                submittedAt: true,
+                gradedAt: true,
+                results: {
+                  select: {
+                    questionId: true,
+                    answer: true,
+                    isCorrect: true,
+                    responseTimeMs: true,
+                    createdAt: true,
+                  },
+                },
+              },
+            },
+          },
+        })
+      : [];
+
+    const studentAssignments = assignedRows.flatMap((r) =>
+      (r.attempts ?? []).map((a) => ({
+        id: a.id,
+        assignmentId: r.assignmentId,
+        attemptNo: a.attemptNo,
+        status: a.status,
+        score: a.score,
+        startedAt: a.startedAt,
+        submittedAt: a.submittedAt,
+        gradedAt: a.gradedAt,
+        results: a.results ?? [],
+      })),
+    );
+
+    const assignedMeta = assignedRows.map((r) => ({
+      assignmentId: r.assignmentId,
+      assignedAt: r.assignedAt,
+    }));
+
+    return {
+      student,
+      lesson,
+      studentAssignments,
+      assignedMeta,
     };
   }
 

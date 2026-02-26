@@ -75,7 +75,7 @@ export class StudentBotInternalService {
     if (!data) throw new NotFoundException('Assignment not found');
 
     return {
-      studentAssignmentId: data.studentAssignment.id,
+      attemptId: data.studentAssignment.id,
       attemptNo: data.studentAssignment.attemptNo,
       status: data.studentAssignment.status,
       attemptsPolicy: {
@@ -93,7 +93,7 @@ export class StudentBotInternalService {
 
     const saved = await this.repo.saveAttemptResultsAndComplete({
       userId: studentId,
-      studentAssignmentId: dto.studentAssignmentId,
+      attemptId: dto.attemptId,
       results: dto.results,
       clientSessionId: dto.clientSessionId ?? null,
     });

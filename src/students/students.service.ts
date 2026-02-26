@@ -10,6 +10,8 @@ import { StudentsRepository } from 'repositories/student-repository';
 import { round1 } from 'common/utils/round';
 import { DONE_STATUSES } from 'common/constants/student-assignment';
 import { UpdateStudentDto } from './dto/update-student.dto';
+import { StudentLessonProgressDto } from 'students/dto/student-lesson-progress.dto';
+import { StudentAttemptStatus } from '@prisma/client';
 
 @Injectable()
 export class StudentsService {
@@ -126,7 +128,7 @@ export class StudentsService {
       const lessonId = assignmentToLessonId.get(sa.assignmentId);
       if (!lessonId) continue;
 
-      if (DONE_STATUSES.includes(sa.status)) {
+      if (sa.status && DONE_STATUSES.includes(sa.status)) {
         doneByLesson.set(lessonId, (doneByLesson.get(lessonId) ?? 0) + 1);
         assignmentsDoneAll += 1;
       }
@@ -219,6 +221,179 @@ export class StudentsService {
         lastSubmittedAt: lastSubmittedAtAll,
       },
       lessons: lessonsDto,
+    };
+  }
+
+  async getStudentLessonProgress(
+    teacherId: number,
+    studentId: number,
+    lessonId: number,
+  ): Promise<StudentLessonProgressDto> {
+    const canSee = await this.groupRepo.teacherHasStudent(teacherId, studentId);
+    if (!canSee) throw new ForbiddenException('No access to this student');
+
+    const data = await this.studentsRepo.getStudentLessonProgressRaw(
+      studentId,
+      lessonId,
+    );
+
+    if (!data.student) throw new NotFoundException('Student not found');
+    if (!data.lesson) throw new NotFoundException('Lesson not found');
+    if (data.lesson.archived) throw new NotFoundException('Lesson not found');
+
+    if (data.lesson.createdById !== teacherId) {
+      throw new ForbiddenException('You are not the owner of this lesson');
+    }
+
+    const allAssignments = data.lesson.assignments ?? [];
+
+    const assignedMeta = data.assignedMeta;
+
+    const assignedSet = new Set<number>(
+      (assignedMeta ?? []).map((x) => x.assignmentId),
+    );
+
+    const assignedAtByAssignmentId = new Map<number, Date>(
+      (assignedMeta ?? []).map((x) => [x.assignmentId, x.assignedAt]),
+    );
+
+    const assignments = allAssignments.filter((a) => assignedSet.has(a.id));
+    const totalCount = assignments.length;
+
+    type AttemptRow = {
+      id: number;
+      assignmentId: number;
+      attemptNo: number;
+      status: StudentAttemptStatus;
+      score: number | null;
+      startedAt: Date | null;
+      submittedAt: Date | null;
+      gradedAt: Date | null;
+      results: Array<{
+        questionId: number;
+        answer: any;
+        isCorrect: boolean | null;
+        responseTimeMs: number | null;
+        createdAt: Date;
+      }>;
+    };
+
+    const studentAttempts: AttemptRow[] = data.studentAssignments;
+
+    const attemptsByAssignment = new Map<number, AttemptRow[]>();
+    for (const sa of studentAttempts) {
+      if (!assignedSet.has(sa.assignmentId)) continue;
+
+      const arr = attemptsByAssignment.get(sa.assignmentId) ?? [];
+      arr.push(sa);
+      attemptsByAssignment.set(sa.assignmentId, arr);
+    }
+
+    let completedCount = 0;
+    let scoreSum = 0;
+    let scoreCount = 0;
+    let lastActivityAt: Date | null = null;
+
+    for (const a of assignments) {
+      const attempts = (attemptsByAssignment.get(a.id) ?? []).sort(
+        (x, y) => x.attemptNo - y.attemptNo,
+      );
+      if (!attempts.length) continue;
+
+      const last = attempts[attempts.length - 1];
+
+      for (const t of attempts) {
+        const candidates = [t.startedAt, t.submittedAt, t.gradedAt].filter(
+          Boolean,
+        ) as Date[];
+
+        for (const d of candidates) {
+          if (!lastActivityAt || d > lastActivityAt) lastActivityAt = d;
+        }
+      }
+
+      if (DONE_STATUSES.includes(last.status)) completedCount += 1;
+
+      if (typeof last.score === 'number') {
+        scoreSum += last.score;
+        scoreCount += 1;
+      }
+    }
+
+    if (!lastActivityAt) {
+      for (const a of assignments) {
+        const d = assignedAtByAssignmentId.get(a.id);
+        if (d && (!lastActivityAt || d > lastActivityAt)) lastActivityAt = d;
+      }
+    }
+
+    const avgScore = scoreCount > 0 ? scoreSum / scoreCount : null;
+
+    const assignmentsDto = assignments.map((a) => {
+      const attempts = (attemptsByAssignment.get(a.id) ?? []).sort(
+        (x, y) => x.attemptNo - y.attemptNo,
+      );
+
+      const questions = a.questions ?? [];
+
+      const attemptsDto = attempts.map((sa) => {
+        const resultsByQuestionId = new Map<
+          number,
+          AttemptRow['results'][number]
+        >();
+        for (const r of sa.results ?? [])
+          resultsByQuestionId.set(r.questionId, r);
+
+        const questionsDto = questions.map((q) => {
+          const res = resultsByQuestionId.get(q.id);
+          const correct = (q.answers ?? []).find((ans) => ans.isCorrect);
+
+          return {
+            id: q.id,
+            text: q.text,
+            questionType: q.questionType.name,
+            explanation: q.explanation ?? null,
+            studentAnswer: res?.answer ?? null,
+            isCorrect: res?.isCorrect ?? null,
+            correctAnswerText: correct?.text ?? null,
+          };
+        });
+
+        return {
+          id: sa.id,
+          attemptNo: sa.attemptNo,
+          status: sa.status,
+          score: sa.score ?? null,
+          startedAt: sa.startedAt ?? null,
+          submittedAt: sa.submittedAt ?? null,
+          gradedAt: sa.gradedAt ?? null,
+          questions: questionsDto,
+        };
+      });
+
+      return {
+        id: a.id,
+        type: a.type,
+        attempts: attemptsDto,
+      };
+    });
+
+    return {
+      lesson: { id: data.lesson.id, title: data.lesson.title },
+      student: {
+        id: data.student.id,
+        username: data.student.username,
+        firstName: data.student.firstName,
+        lastName: data.student.lastName,
+        avatarUrl: data.student.avatarUrl,
+      },
+      overall: {
+        completedCount,
+        totalCount,
+        avgScore,
+        lastActivityAt,
+      },
+      assignments: assignmentsDto,
     };
   }
   async updateStudentProfile(
