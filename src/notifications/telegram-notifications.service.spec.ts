@@ -114,7 +114,7 @@ describe('TelegramNotificationsService (unit, manual DI)', () => {
       expect(httpService.post).toHaveBeenCalled();
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining(
-          'Failed to send teacher request notification to bot:',
+          'Telegram notify failed (/internal/teacher-request): boom',
         ),
       );
     });
