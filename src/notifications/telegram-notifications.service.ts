@@ -10,12 +10,7 @@ export class TelegramNotificationsService {
 
   constructor(private readonly http: HttpService) {}
 
-  async sendTeacherRequest(options: {
-    telegramId: string;
-    inviteId: number;
-    teacherName: string;
-    message?: string;
-  }): Promise<void> {
+  private async postInternal(path: string, payload: unknown): Promise<void> {
     if (!this.botBaseUrl) {
       this.logger.warn(
         'TELEGRAM_BOT_INTERNAL_URL is not configured, skipping notify',
@@ -23,30 +18,45 @@ export class TelegramNotificationsService {
       return;
     }
 
-    const payload = {
-      telegramId: options.telegramId,
-      inviteId: options.inviteId,
-      teacherName: options.teacherName,
-      message: options.message ?? null,
-    };
-
     try {
       await firstValueFrom(
-        this.http.post(`${this.botBaseUrl}/internal/teacher-request`, payload, {
-          headers: {
-            'x-internal-token': this.internalToken ?? '',
-          },
+        this.http.post(`${this.botBaseUrl}${path}`, payload, {
+          headers: { 'x-internal-token': this.internalToken ?? '' },
           timeout: 5000,
         }),
       );
     } catch (error) {
-      console.log(error);
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-
-      this.logger.error(
-        `Failed to send teacher request notification to bot: ${errorMessage}`,
-      );
+      this.logger.error(`Telegram notify failed (${path}): ${errorMessage}`);
     }
+  }
+
+  async sendLessonAssigned(options: {
+    telegramId: string;
+    lessonId: number;
+    lessonTitle: string;
+    teacherName?: string | null;
+  }): Promise<void> {
+    return this.postInternal('/internal/lesson-assigned', {
+      telegramId: options.telegramId,
+      lessonId: options.lessonId,
+      lessonTitle: options.lessonTitle,
+      teacherName: options.teacherName ?? null,
+    });
+  }
+
+  async sendTeacherRequest(options: {
+    telegramId: string;
+    inviteId: number;
+    teacherName: string;
+    message?: string;
+  }): Promise<void> {
+    return this.postInternal('/internal/teacher-request', {
+      telegramId: options.telegramId,
+      inviteId: options.inviteId,
+      teacherName: options.teacherName,
+      message: options.message ?? null,
+    });
   }
 }

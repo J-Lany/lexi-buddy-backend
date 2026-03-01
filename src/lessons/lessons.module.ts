@@ -5,9 +5,10 @@ import { PrismaService } from 'prisma/prisma.service';
 import { LessonRepository } from 'repositories/lesson.repository';
 import { AssignmentRepository } from 'repositories/assignment.repository';
 import { AiModule } from 'ai/ai.module';
+import { TelegramNotificationsModule } from 'notifications/telegram-notifications.module';
 
 @Module({
-  imports: [AiModule],
+  imports: [AiModule, TelegramNotificationsModule],
   controllers: [LessonsController],
   providers: [
     LessonsService,

@@ -74,18 +74,28 @@ export class AiService {
   }
 
   private isAiQuestion(item: unknown): item is AiQuestion {
-    return (
-      typeof item === 'object' &&
-      item !== null &&
-      'question' in item &&
-      'answers' in item &&
-      Array.isArray((item as AiQuestion).answers) &&
-      (item as AiQuestion).answers.every(
-        (a) =>
-          typeof (a as { text: string }).text === 'string' &&
-          typeof (a as { isCorrect: boolean }).isCorrect === 'boolean',
-      )
+    if (typeof item !== 'object' || item === null) return false;
+    const it = item as any;
+
+    if (typeof it.question !== 'string') return false;
+    if (!Array.isArray(it.answers)) return false;
+
+    const okAnswers = it.answers.every(
+      (a: any) =>
+        a && typeof a.text === 'string' && typeof a.isCorrect === 'boolean',
     );
+    if (!okAnswers) return false;
+
+    if (
+      it.questionType !== undefined &&
+      it.questionType !== 'multiple_choice' &&
+      it.questionType !== 'gap_fill' &&
+      it.questionType !== 'open_text'
+    ) {
+      return false;
+    }
+
+    return true;
   }
 
   private isAiVocabItemArray(arr: unknown[]): arr is AiVocabItem[] {
@@ -118,6 +128,85 @@ export class AiService {
     }
 
     return null;
+  }
+
+  private normalizeAnswers(
+    raw: Array<{ text: unknown; isCorrect: unknown }>,
+  ): { text: string; isCorrect: boolean }[] {
+    const seen = new Set<string>();
+    const cleaned: { text: string; isCorrect: boolean }[] = [];
+
+    for (const a of raw) {
+      const text = typeof a?.text === 'string' ? a.text.trim() : '';
+      if (!text) continue;
+
+      const dePrefixed = text
+        .replace(/^\s*([A-Da-d]|\d+)[.)\-:]\s+/u, '')
+        .replace(/^\s*-\s+/u, '')
+        .trim();
+
+      if (!dePrefixed) continue;
+
+      const key = dePrefixed.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      cleaned.push({
+        text: dePrefixed,
+        isCorrect: typeof a?.isCorrect === 'boolean' ? a.isCorrect : false,
+      });
+    }
+
+    return cleaned;
+  }
+
+  private ensureExactlyOneCorrect(
+    answers: { text: string; isCorrect: boolean }[],
+  ): { text: string; isCorrect: boolean }[] {
+    if (!answers.length) return answers;
+
+    const idxs = answers
+      .map((a, i) => (a.isCorrect ? i : -1))
+      .filter((i) => i !== -1);
+
+    if (idxs.length === 0) {
+      answers[0].isCorrect = true;
+      return answers;
+    }
+
+    if (idxs.length > 1) {
+      const keep = idxs[0];
+      for (let i = 0; i < answers.length; i++) {
+        answers[i].isCorrect = i === keep;
+      }
+    }
+
+    return answers;
+  }
+
+  private enforceAnswerCount(
+    answers: { text: string; isCorrect: boolean }[],
+    count: number,
+  ): { text: string; isCorrect: boolean }[] {
+    if (answers.length < count) return [];
+    if (answers.length === count) return answers;
+
+    const correctIndex = answers.findIndex((a) => a.isCorrect);
+    const picked: { text: string; isCorrect: boolean }[] = [];
+
+    if (correctIndex >= 0) picked.push(answers[correctIndex]);
+
+    for (let i = 0; i < answers.length && picked.length < count; i++) {
+      if (i === correctIndex) continue;
+      picked.push(answers[i]);
+    }
+
+    return this.ensureExactlyOneCorrect(picked);
+  }
+
+  private normalizeQuestionText(text: unknown): string {
+    if (typeof text !== 'string') return '';
+    return text.trim();
   }
 
   async translateVocab(
@@ -186,44 +275,56 @@ export class AiService {
       return [];
     }
 
+    if (!this.isAiQuestionArray(arr)) {
+      this.logger.error('AI returned JSON but not questions array', raw);
+      return [];
+    }
+
     const result: AiQuestion[] = [];
 
-    if (this.isAiQuestionArray(arr)) {
-      arr.forEach((item) => {
-        const questionType =
-          item.questionType === 'multiple_choice' ||
-          item.questionType === 'gap_fill' ||
-          item.questionType === 'open_text'
-            ? item.questionType
-            : 'multiple_choice';
+    arr.forEach((item) => {
+      const question = this.normalizeQuestionText(item.question);
+      if (!question) return;
 
-        const answersRaw = item.answers;
-        const answers = (Array.isArray(answersRaw) ? answersRaw : []).map(
-          (a) => ({
-            text: a.text,
-            isCorrect: Boolean(a.isCorrect),
-          }),
-        );
+      const questionType =
+        item.questionType === 'multiple_choice' ||
+        item.questionType === 'gap_fill' ||
+        item.questionType === 'open_text'
+          ? item.questionType
+          : 'multiple_choice';
 
-        if (!answers.length) return;
+      const answersRaw = Array.isArray(item.answers) ? item.answers : [];
+      let answers = this.normalizeAnswers(
+        answersRaw.map((a) => ({
+          text: (a as any)?.text,
+          isCorrect: (a as any)?.isCorrect,
+        })),
+      );
 
-        if (!answers.some((a) => a.isCorrect)) {
-          answers[0].isCorrect = true;
-        }
+      if (trainingType === 'phrase_fail') {
+        answers = this.enforceAnswerCount(answers, 3);
+      } else if (questionType === 'multiple_choice') {
+        if (answers.length < 3) return;
+      } else {
+        if (answers.length < 1) return;
+      }
 
-        const explanation =
-          typeof item.explanation === 'string'
-            ? item.explanation.trim()
-            : undefined;
+      if (!answers.length) return;
 
-        result.push({
-          question: item.question,
-          questionType,
-          answers,
-          explanation,
-        });
+      answers = this.ensureExactlyOneCorrect(answers);
+
+      const explanation =
+        typeof item.explanation === 'string'
+          ? item.explanation.trim()
+          : undefined;
+
+      result.push({
+        question,
+        questionType,
+        answers,
+        explanation,
       });
-    }
+    });
 
     return result;
   }
