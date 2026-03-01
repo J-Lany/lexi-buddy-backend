@@ -134,17 +134,21 @@ Each question must:
 You are creating questions where the learner must identify WRONG usage of a phrase.
 
 For each target phrase:
-- Write THREE sentences with this phrase:
-  - 2 sentences use the phrase correctly (natural, correct context).
-  - 1 sentence uses the phrase incorrectly (unnatural or wrong meaning).
+- Write EXACTLY THREE standalone sentences that include the target phrase:
+  - 2 sentences use the phrase correctly (natural, correct meaning).
+  - 1 sentence uses the phrase incorrectly (wrong meaning or unnatural context).
 - The learner must choose the incorrect sentence.
 
-Each question must:
+CRITICAL OUTPUT RULES:
 - Use "multiple_choice" as questionType.
-- Use a single string in "question" that contains the 3 sentences, separated by line breaks (\\n).
-- In "answers", each answer is one of these sentences:
-  - The incorrect sentence must have isCorrect: true.
-  - The two correct sentences must have isCorrect: false.
+- "question" MUST be a short instruction only. Do NOT include the 3 sentences in "question".
+  Good examples:
+  - "Find the sentence where the phrase is used incorrectly."
+  - "Which sentence uses the phrase incorrectly?"
+- "answers" MUST contain EXACTLY 3 answers, each answer "text" is ONE of the sentences.
+- Do NOT prefix sentences with "A.", "B.", "C." or numbering.
+- Exactly ONE answer must have isCorrect: true — it MUST be the incorrect sentence.
+- The other two answers must have isCorrect: false.
 `,
 
   collocation_check: `

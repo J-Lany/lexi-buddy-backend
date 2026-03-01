@@ -148,6 +148,14 @@ export class StudentBotInternalRepository {
             level: true,
             ageCategory: true,
             topic: true,
+            vocab: {
+              orderBy: { id: 'asc' },
+              select: {
+                term: true,
+                translation: true,
+                synonyms: true,
+              },
+            },
           },
         },
         questions: {
@@ -178,6 +186,13 @@ export class StudentBotInternalRepository {
         ageCategory: a.lesson.ageCategory ?? null,
         topic: a.lesson.topic ?? null,
       },
+
+      vocab: (a.lesson.vocab ?? []).map((v) => ({
+        term: v.term,
+        translation: v.translation ?? null,
+        synonyms: Array.isArray(v.synonyms) ? (v.synonyms as string[]) : null,
+      })),
+
       questions: a.questions.map((q) => ({
         id: q.id,
         text: q.text,

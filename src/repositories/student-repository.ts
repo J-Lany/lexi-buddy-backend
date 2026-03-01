@@ -7,6 +7,9 @@ export class StudentsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async getStudentDashboardRaw(teacherId: number, studentId: number) {
+    const INDIVIDUAL_NAME_PREFIX = 'Индивидуально с учителем';
+    const INDIVIDUAL_DESC = 'Индивидуальная группа (1-на-1)';
+
     const groups = await this.prisma.groupMember.findMany({
       where: {
         userId: studentId,
@@ -14,6 +17,10 @@ export class StudentsRepository {
         removedAt: null,
         group: {
           archived: false,
+          NOT: [
+            { description: INDIVIDUAL_DESC },
+            { name: { startsWith: INDIVIDUAL_NAME_PREFIX } },
+          ],
           members: {
             some: {
               userId: teacherId,
@@ -188,6 +195,7 @@ export class StudentsRepository {
                 submittedAt: true,
                 gradedAt: true,
                 results: {
+                  orderBy: [{ createdAt: 'asc' }],
                   select: {
                     questionId: true,
                     answer: true,

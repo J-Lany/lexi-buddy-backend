@@ -20,11 +20,13 @@ import { TrainingTypeKey } from 'ai/prompts';
 import { LessonSummaryDto } from './dto/lesson-summary.dto';
 import { LessonDetailsDto } from './dto/lesson-details.dto';
 import { DONE_STATUSES } from 'common/constants/student-assignment';
+import { TelegramNotificationsService } from 'notifications/telegram-notifications.service';
 
 @Injectable()
 export class LessonsService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly telegramNotificationsService: TelegramNotificationsService,
     private readonly lessonRepo: LessonRepository,
     private readonly assignmentRepo: AssignmentRepository,
     private readonly ai: AiService,
@@ -316,7 +318,6 @@ export class LessonsService {
     const groupIds = Array.from(
       new Set((dto.groupIds ?? []).filter((x) => Number.isInteger(x))),
     );
-
     const directStudentIds = Array.from(
       new Set((dto.studentIds ?? []).filter((x) => Number.isInteger(x))),
     );
@@ -325,11 +326,12 @@ export class LessonsService {
       throw new BadRequestException('studentIds or groupIds must be provided');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const lesson = await tx.lesson.findUnique({
         where: { id: lessonId },
         select: {
           id: true,
+          title: true,
           createdById: true,
           assignments: { select: { id: true } },
         },
@@ -339,7 +341,15 @@ export class LessonsService {
       this.ensureLessonOwner(lesson.createdById, teacherId);
 
       const assignmentIds = lesson.assignments.map((a) => a.id);
-      if (!assignmentIds.length) return { created: 0 };
+      if (!assignmentIds.length) {
+        return {
+          created: 0,
+          usersTargeted: 0,
+          assignmentsTargeted: 0,
+          usersToNotify: [] as number[],
+          lessonTitle: lesson.title,
+        };
+      }
 
       if (groupIds.length) {
         const allowed = await tx.groupMember.findMany({
@@ -409,18 +419,46 @@ export class LessonsService {
       targetUserIds.delete(teacherId);
 
       const userIds = Array.from(targetUserIds);
-      if (!userIds.length) return { created: 0 };
+      if (!userIds.length) {
+        return {
+          created: 0,
+          usersTargeted: 0,
+          assignmentsTargeted: assignmentIds.length,
+          usersToNotify: [] as number[],
+          lessonTitle: lesson.title,
+        };
+      }
 
-      const data: Prisma.StudentAssignedAssignmentCreateManyInput[] =
-        userIds.flatMap((userId) =>
-          assignmentIds.map((assignmentId) => ({ userId, assignmentId })),
-        );
+      // ✅ ИДЕАЛЬНЫЙ ДИФФ: узнаём что уже есть, создаём только missing
+      const existing = await tx.studentAssignedAssignment.findMany({
+        where: { userId: { in: userIds }, assignmentId: { in: assignmentIds } },
+        select: { userId: true, assignmentId: true },
+      });
 
-      const createdStudentAssignments =
+      const existingSet = new Set(
+        existing.map((x) => `${x.userId}:${x.assignmentId}`),
+      );
+
+      const missingData: Prisma.StudentAssignedAssignmentCreateManyInput[] = [];
+      for (const userId of userIds) {
+        for (const assignmentId of assignmentIds) {
+          const key = `${userId}:${assignmentId}`;
+          if (!existingSet.has(key)) {
+            missingData.push({ userId, assignmentId });
+          }
+        }
+      }
+
+      if (missingData.length) {
         await tx.studentAssignedAssignment.createMany({
-          data,
+          data: missingData,
           skipDuplicates: true,
         });
+      }
+
+      const usersToNotify = Array.from(
+        new Set(missingData.map((x) => x.userId)),
+      );
 
       if (groupIds.length) {
         await tx.groupLesson.createMany({
@@ -430,10 +468,49 @@ export class LessonsService {
       }
 
       return {
-        created: createdStudentAssignments.count,
+        created: missingData.length, // это точное число новых связок userId-assignmentId, которые мы хотели создать
         usersTargeted: userIds.length,
         assignmentsTargeted: assignmentIds.length,
+        usersToNotify,
+        lessonTitle: lesson.title,
       };
     });
+
+    if (result.usersToNotify.length) {
+      const contacts = await this.prisma.userContact.findMany({
+        where: {
+          userId: { in: result.usersToNotify },
+          contactType: { name: 'telegram' },
+        },
+        select: { contactValue: true },
+      });
+
+      const teacher = await this.prisma.user.findUnique({
+        where: { id: teacherId },
+        select: { firstName: true, lastName: true, username: true },
+      });
+
+      const teacherName =
+        [teacher?.firstName, teacher?.lastName].filter(Boolean).join(' ') ||
+        teacher?.username ||
+        null;
+
+      await Promise.allSettled(
+        contacts.map((c) =>
+          this.telegramNotificationsService.sendLessonAssigned({
+            telegramId: c.contactValue,
+            lessonId,
+            lessonTitle: result.lessonTitle,
+            teacherName,
+          }),
+        ),
+      );
+    }
+
+    return {
+      created: result.created,
+      usersTargeted: result.usersTargeted,
+      assignmentsTargeted: result.assignmentsTargeted,
+    };
   }
 }

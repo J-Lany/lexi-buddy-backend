@@ -339,13 +339,20 @@ export class StudentsService {
       const attemptsDto = attempts.map((sa) => {
         const resultsByQuestionId = new Map<
           number,
-          AttemptRow['results'][number]
+          Array<AttemptRow['results'][number]>
         >();
-        for (const r of sa.results ?? [])
-          resultsByQuestionId.set(r.questionId, r);
+
+        for (const r of sa.results ?? []) {
+          const arr = resultsByQuestionId.get(r.questionId) ?? [];
+          arr.push(r);
+          resultsByQuestionId.set(r.questionId, arr);
+        }
 
         const questionsDto = questions.map((q) => {
-          const res = resultsByQuestionId.get(q.id);
+          const list = resultsByQuestionId.get(q.id) ?? [];
+          list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+
+          const last = list[list.length - 1] ?? null;
           const correct = (q.answers ?? []).find((ans) => ans.isCorrect);
 
           return {
@@ -353,8 +360,19 @@ export class StudentsService {
             text: q.text,
             questionType: q.questionType.name,
             explanation: q.explanation ?? null,
-            studentAnswer: res?.answer ?? null,
-            isCorrect: res?.isCorrect ?? null,
+
+            studentAnswers: list.map((r) => ({
+              value: r.answer ?? null,
+              isCorrect: r.isCorrect ?? null,
+              responseTimeMs: r.responseTimeMs ?? null,
+              createdAt: r.createdAt,
+              attempt:
+                typeof r.answer?.attempt === 'number' ? r.answer.attempt : null,
+            })),
+
+            studentAnswer: last?.answer ?? null,
+            isCorrect: last?.isCorrect ?? null,
+
             correctAnswerText: correct?.text ?? null,
           };
         });
