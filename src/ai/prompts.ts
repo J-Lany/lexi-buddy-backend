@@ -108,63 +108,119 @@ You are creating multiple-choice questions that test the meaning of target phras
 
 For each target phrase:
 - Create exactly ONE question.
-- The question must test understanding of the phrase's meaning (definition).
-- Use learner-friendly language, matching the student's level.
-
-Each question must:
-- Use "multiple_choice" as questionType.
-- Have 1 correct definition and 2–3 incorrect but plausible definitions in "answers".
-`,
-
-  gap_filling: `
-You are creating gap-filling questions.
-
-For each target phrase:
-- Write ONE natural sentence that clearly shows the phrase in context.
-- Replace the phrase (or its core part) in the sentence with a gap "____".
-
-Each question must:
-- Use "gap_fill" as questionType.
-- Use the full sentence with the gap as "question".
-- Put the correct phrase as one answer with isCorrect: true.
-- Add 1–2 common but wrong alternatives as other answers with isCorrect: false.
-`,
-
-  phrase_fail: `
-You are creating questions where the learner must identify WRONG usage of a phrase.
-
-For each target phrase:
-- Write EXACTLY THREE standalone sentences that include the target phrase:
-  - 2 sentences use the phrase correctly (natural, correct meaning).
-  - 1 sentence uses the phrase incorrectly (wrong meaning or unnatural context).
-- The learner must choose the incorrect sentence.
 
 CRITICAL OUTPUT RULES:
 - Use "multiple_choice" as questionType.
-- "question" MUST be a short instruction only. Do NOT include the 3 sentences in "question".
-  Good examples:
-  - "Find the sentence where the phrase is used incorrectly."
-  - "Which sentence uses the phrase incorrectly?"
-- "answers" MUST contain EXACTLY 3 answers, each answer "text" is ONE of the sentences.
-- Do NOT prefix sentences with "A.", "B.", "C." or numbering.
-- Exactly ONE answer must have isCorrect: true — it MUST be the incorrect sentence.
-- The other two answers must have isCorrect: false.
-`,
+- "question" should focus on meaning/definition. Keep it short and clear.
+- "answers" MUST contain EXACTLY 3 options:
+  - 1 correct definition (isCorrect: true)
+  - 2 plausible but incorrect definitions (isCorrect: false)
+- Do NOT include "A/B/C" labels or numbering inside answer texts.
+- The incorrect options must be believable (not silly), but clearly wrong.
 
-  collocation_check: `
-You are creating questions about natural collocations with the target phrase.
+LEVEL ADAPTATION:
+- Beginner: very simple wording, very common vocabulary, no complicated grammar.
+- Intermediate: clear modern English, slightly richer vocabulary, still learner-friendly.
+- Advanced: natural modern English, more nuanced definitions, still clear.
+
+OUTPUT QUALITY:
+- Avoid trick questions.
+- Avoid rare idioms unless the target phrase itself is rare.
+- Explanation must be short (1–2 sentences) and learner-friendly.
+`.trim(),
+
+  gap_filling: `
+You are creating gap-filling questions where the student types the missing phrase.
 
 For each target phrase:
-- Create 3–4 short collocations or mini-phrases where the target phrase is the missing part (gap "____") or the key word.
-- The learner must choose the correct phrase that fits all (or most) collocations naturally.
+- Write ONE natural sentence that clearly shows the phrase in context.
+- Replace the target phrase (or its core part) with a gap "____".
+- The sentence must make the intended meaning obvious.
 
-Each question must:
+CRITICAL OUTPUT RULES:
+- Use "gap_fill" as questionType.
+- "question" MUST be the full sentence containing exactly ONE "____".
+- "answers" MUST contain EXACTLY 1 answer object:
+  - text = the missing target phrase (the correct fill)
+  - isCorrect = true
+- Do NOT include any wrong answer options.
+- Do NOT include multiple gaps.
+- Do NOT add hints like "(use …)" inside the question.
+
+LEVEL ADAPTATION:
+- Beginner: short sentence, very simple surrounding words.
+- Intermediate: natural everyday sentence, clear context.
+- Advanced: natural, slightly richer context, still unambiguous.
+
+EXPLANATION:
+- 1–2 short sentences:
+  - why the phrase fits this context
+  - optionally a quick meaning reminder (simple)
+`.trim(),
+
+  phrase_fail: `
+You are creating multiple-choice questions where the learner must identify INCORRECT usage of a target phrase.
+
+For each target phrase:
+- Write EXACTLY THREE standalone sentences that include the target phrase.
+  - 2 sentences use the phrase correctly (natural grammar + correct meaning).
+  - 1 sentence uses the phrase incorrectly.
+
+IMPORTANT: The incorrect sentence should be wrong mainly because of meaning/context (wrong usage),
+not because of a tiny grammar detail.
+
+CRITICAL OUTPUT RULES:
 - Use "multiple_choice" as questionType.
-- Use the collocations (with a gap ____ for the missing phrase) in "question".
-- In "answers":
-  - One option is the correct target phrase with isCorrect: true.
-  - 2–3 other options are plausible but wrong phrases with isCorrect: false.
-`,
+- "question" MUST be a short instruction only. Do NOT include the sentences in "question".
+  Good examples:
+  - "Which sentence uses the phrase incorrectly?"
+  - "Find the sentence where the phrase is used incorrectly."
+- "answers" MUST contain EXACTLY 3 answers.
+- Each answer "text" MUST be ONE sentence only.
+- Do NOT number the sentences and do NOT prefix with A/B/C.
+- Exactly ONE answer must have isCorrect: true — it MUST be the incorrect sentence.
+- The two correct sentences must be different (not near-duplicates).
+
+LEVEL ADAPTATION:
+- Beginner: keep sentences short; make the incorrect usage obviously wrong by meaning (not grammar traps).
+- Intermediate: natural sentences; the incorrect one should still be clearly wrong.
+- Advanced: can be a bit more nuanced, but still clearly wrong.
+
+EXPLANATION:
+- 1–2 short sentences:
+  - briefly explain why the incorrect one is wrong
+  - briefly explain what the phrase actually means / how it’s used
+`.trim(),
+
+  collocation_check: `
+You are creating collocation practice for a target phrase where the student types the missing phrase.
+
+For each target phrase:
+- Create 3–4 short collocations or mini-sentences.
+- In EACH line, replace the target phrase with a gap "____".
+- All lines must fit the SAME missing phrase naturally.
+- Keep each line short and clear.
+
+CRITICAL OUTPUT RULES:
+- Use "open_text" as questionType.
+- "question" MUST contain the 3–4 lines, each on a NEW line.
+- Each line MUST contain exactly ONE "____".
+- "answers" MUST contain EXACTLY 1 answer object:
+  - text = the target phrase that fits the lines
+  - isCorrect = true
+- Do NOT include any wrong answer options.
+- Do NOT include extra commentary outside the JSON fields.
+
+LEVEL ADAPTATION:
+- Beginner: very common collocations, very short lines, simple surrounding words.
+- Intermediate: natural everyday collocations, still clear.
+- Advanced: richer collocations, but still unambiguous.
+
+EXPLANATION:
+- 1–2 short sentences:
+  - explain why the phrase fits these collocations
+  - optionally clarify the meaning briefly
+`.trim(),
 };
 
 export function getAssignmentPrompt(params: {
@@ -189,46 +245,51 @@ export function getAssignmentPrompt(params: {
 
   return `
 ${profile ?? ''}
+
 You are an English teaching assistant.
+Create ${questionsCount} exercise items in STRICT JSON.
 
 ${topicPart}
 
-You will generate exercises of type: ${trainingType}.
-You have the following target phrases:
+Exercise type key: ${trainingType}
+Target phrases:
 ${termsList}
 
-Number of questions to generate: ${questionsCount}.
-Preferably, create one question per target phrase. 
-If there are more target phrases than questionsCount, choose the most important phrases.
-If there are fewer phrases than questionsCount, you may create more than one question for some phrases.
+COUNT RULES:
+- Return EXACTLY ${questionsCount} questions.
+- Prefer 1 question per target phrase.
+- If there are more phrases than ${questionsCount}, pick the most important ones.
+- If there are fewer phrases than ${questionsCount}, you may create extra questions using some phrases again (use different contexts).
 
 TASK INSTRUCTIONS (VERY IMPORTANT):
 ${typePrompt}
 
 OUTPUT FORMAT (STRICT JSON):
-Return ONLY a JSON array, nothing else before or after it.
-The array must contain EXACTLY ${questionsCount} elements.
+Return ONLY a JSON array. No markdown. No comments. No extra text.
 
-Each element MUST be an object with the following shape:
+Each element MUST be an object:
 
 {
-  "question": "string",                     // question text shown to the student
+  "question": "string",
   "questionType": "multiple_choice" | "gap_fill" | "open_text",
   "answers": [
     { "text": "answer text", "isCorrect": true | false }
   ],
-  "explanation": "short, simple explanation of why the correct answer is correct and why the other options are wrong"
+  "explanation": "short, simple explanation"
 }
 
-Rules:
-- For "definition_quiz": questionType MUST be "multiple_choice".
-- For "gap_filling": questionType MUST be "gap_fill".
-- For "phrase_fail": questionType MUST be "multiple_choice".
-- For "collocation_check": questionType MUST be "multiple_choice".
-- In every question, there must be EXACTLY ONE answer where "isCorrect": true.
-- All other answers MUST have "isCorrect": false.
-- "explanation" MUST be a short (1–2 sentences), clear, learner-friendly explanation.
-- Explanations should NOT introduce new advanced vocabulary that the learner does not know.
-- Do NOT include explanations, comments, or any extra fields outside the JSON array.
+GLOBAL RULES:
+- Always include "questionType".
+- Always include "answers" (array).
+- There must be EXACTLY ONE answer where "isCorrect": true.
+- If there are other answers, they MUST have "isCorrect": false.
+- "explanation" MUST be short (1–2 sentences), clear, learner-friendly.
+- Do NOT use difficult vocabulary in explanations.
+
+TYPE RULES (must match the exercise type):
+- definition_quiz  -> questionType MUST be "multiple_choice" and answers length MUST be exactly 3.
+- gap_filling      -> questionType MUST be "gap_fill" and answers length MUST be exactly 1 (only the correct phrase).
+- phrase_fail      -> questionType MUST be "multiple_choice" and answers length MUST be exactly 3 (sentences).
+- collocation_check-> questionType MUST be "open_text" and answers length MUST be exactly 1 (only the correct phrase).
 `.trim();
 }

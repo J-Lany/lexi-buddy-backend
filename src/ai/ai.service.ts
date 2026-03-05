@@ -41,25 +41,35 @@ export class AiService {
     this.model = this.config.get<string>('QWEN_MODEL')!;
   }
 
-  private async chat(prompt: string): Promise<string> {
-    const payload = {
-      model: this.model,
-      messages: [{ role: 'user', content: prompt }],
-    };
+  private async chat(
+    messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+  ): Promise<string> {
+    try {
+      const payload = {
+        model: this.model,
+        messages,
+      };
 
-    const response = await firstValueFrom(
-      this.http.post(`${this.baseUrl}/chat/completions`, payload, {
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-      }),
-    );
+      const response = await firstValueFrom(
+        this.http.post(`${this.baseUrl}/chat/completions`, payload, {
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          timeout: 90000,
+          maxBodyLength: 2 * 1024 * 1024,
+          maxContentLength: 2 * 1024 * 1024,
+        }),
+      );
 
-    const content =
-      response.data?.choices?.[0]?.message?.content ??
-      JSON.stringify(response.data);
+      const content =
+        response.data?.choices?.[0]?.message?.content ??
+        JSON.stringify(response.data);
 
-    return content;
+      return typeof content === 'string' ? content : String(content);
+    } catch (e) {
+      this.logger.error('AI request failed', e);
+      throw e;
+    }
   }
 
   private isAiVocabItem(item: unknown): item is AiVocabItem {
@@ -67,9 +77,7 @@ export class AiService {
       typeof item === 'object' &&
       item !== null &&
       'term' in item &&
-      'translation' in item &&
-      typeof (item as AiVocabItem).term === 'string' &&
-      typeof (item as AiVocabItem).translation === 'string'
+      'translation' in item
     );
   }
 
@@ -95,7 +103,9 @@ export class AiService {
       return false;
     }
 
-    return true;
+    return !(
+      it.explanation !== undefined && typeof it.explanation !== 'string'
+    );
   }
 
   private isAiVocabItemArray(arr: unknown[]): arr is AiVocabItem[] {
@@ -106,26 +116,38 @@ export class AiService {
     return arr.every((item) => this.isAiQuestion(item));
   }
 
+  private extractJsonArray(raw: string): string | null {
+    const s = raw.trim();
+    if (!s) return null;
+
+    if (s.startsWith('[') && s.endsWith(']')) return s;
+
+    const first = s.indexOf('[');
+    const last = s.lastIndexOf(']');
+    if (first === -1 || last === -1 || last <= first) return null;
+
+    const candidate = s.slice(first, last + 1).trim();
+    if (!candidate.startsWith('[') || !candidate.endsWith(']')) return null;
+
+    return candidate;
+  }
+
   private safeParseJsonArray(raw: string): SafeJsonParseResult {
+    const candidate = this.extractJsonArray(raw);
+    if (!candidate) return null;
+
     let parsed: unknown;
 
     try {
-      parsed = JSON.parse(raw) as unknown;
+      parsed = JSON.parse(candidate) as unknown;
     } catch {
       return null;
     }
 
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
+    if (!Array.isArray(parsed)) return null;
 
-    if (this.isAiVocabItemArray(parsed)) {
-      return parsed;
-    }
-
-    if (this.isAiQuestionArray(parsed)) {
-      return parsed;
-    }
+    if (this.isAiVocabItemArray(parsed)) return parsed;
+    if (this.isAiQuestionArray(parsed)) return parsed;
 
     return null;
   }
@@ -160,6 +182,17 @@ export class AiService {
     return cleaned;
   }
 
+  private normalizeQuestionText(text: unknown): string {
+    if (typeof text !== 'string') return '';
+    return text.trim();
+  }
+
+  private normalizeExplanation(text: unknown): string | undefined {
+    if (typeof text !== 'string') return undefined;
+    const t = text.trim();
+    return t ? t : undefined;
+  }
+
   private ensureExactlyOneCorrect(
     answers: { text: string; isCorrect: boolean }[],
   ): { text: string; isCorrect: boolean }[] {
@@ -189,7 +222,7 @@ export class AiService {
     count: number,
   ): { text: string; isCorrect: boolean }[] {
     if (answers.length < count) return [];
-    if (answers.length === count) return answers;
+    if (answers.length === count) return this.ensureExactlyOneCorrect(answers);
 
     const correctIndex = answers.findIndex((a) => a.isCorrect);
     const picked: { text: string; isCorrect: boolean }[] = [];
@@ -204,9 +237,75 @@ export class AiService {
     return this.ensureExactlyOneCorrect(picked);
   }
 
-  private normalizeQuestionText(text: unknown): string {
-    if (typeof text !== 'string') return '';
-    return text.trim();
+  private expectedShapeByTrainingType(trainingType: TrainingTypeKey): {
+    questionType: AiQuestion['questionType'];
+    answersCount: number;
+  } {
+    if (trainingType === 'gap_filling') {
+      return { questionType: 'gap_fill', answersCount: 1 };
+    }
+
+    if (trainingType === 'collocation_check') {
+      return { questionType: 'open_text', answersCount: 1 };
+    }
+
+    if (trainingType === 'phrase_fail') {
+      return { questionType: 'multiple_choice', answersCount: 3 };
+    }
+
+    return { questionType: 'multiple_choice', answersCount: 3 };
+  }
+
+  private isQuestionTypeAllowedForTraining(
+    trainingType: TrainingTypeKey,
+    qType: unknown,
+  ): qType is AiQuestion['questionType'] {
+    if (
+      qType !== 'multiple_choice' &&
+      qType !== 'gap_fill' &&
+      qType !== 'open_text'
+    ) {
+      return false;
+    }
+
+    const expected =
+      this.expectedShapeByTrainingType(trainingType).questionType;
+    return qType === expected;
+  }
+
+  private buildRepairPrompt(params: {
+    trainingType: TrainingTypeKey;
+    questionsCount: number;
+    expectedQt: AiQuestion['questionType'];
+    expectedAnswers: number;
+  }) {
+    const { trainingType, questionsCount, expectedQt, expectedAnswers } =
+      params;
+
+    return `
+Your previous response did not match the required JSON format or constraints.
+
+Fix it and return ONLY a JSON array with EXACTLY ${questionsCount} elements.
+
+Hard rules:
+- Return ONLY JSON array. No code fences. No extra text.
+- Each element MUST be:
+  {
+    "question": "string",
+    "questionType": "${expectedQt}",
+    "answers": [
+      { "text": "string", "isCorrect": true | false }
+    ],
+    "explanation": "string"
+  }
+- questionType MUST be exactly "${expectedQt}" for EVERY element.
+- answers MUST contain EXACTLY ${expectedAnswers} items for EVERY element.
+- There must be EXACTLY ONE answer with isCorrect: true in EVERY element.
+- Do NOT prefix answers with "A)", "B)", "1.", "-" etc.
+- Keep the language level appropriate and examples natural.
+
+Exercise type: ${trainingType}.
+`.trim();
   }
 
   async translateVocab(
@@ -214,7 +313,7 @@ export class AiService {
     meta?: { topic?: string; level?: string | null; ageGroup?: string | null },
   ): Promise<AiVocabItem[]> {
     const prompt = getTranslatePrompt(words, meta);
-    const raw = await this.chat(prompt);
+    const raw = await this.chat([{ role: 'user', content: prompt }]);
 
     const arr = this.safeParseJsonArray(raw);
     if (!arr) {
@@ -229,19 +328,31 @@ export class AiService {
     const result: AiVocabItem[] = [];
 
     if (this.isAiVocabItemArray(arr)) {
-      arr.forEach((item) => {
-        const term = item.term ?? '';
-        const translation = item.translation ?? '';
-        let synonyms: string[] = [];
+      for (const item of arr) {
+        const term = item.term.trim();
+        const translation = item.translation.trim();
 
+        if (!term || !translation) continue;
+
+        let synonyms: string[] = [];
         if (Array.isArray(item.synonyms)) {
-          synonyms = item.synonyms.filter((s: string) => typeof s === 'string');
+          synonyms = item.synonyms
+            .filter((s: unknown): s is string => typeof s === 'string')
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .slice(0, 3);
         }
 
-        if (!term || !translation) return;
-
         result.push({ term, translation, synonyms });
-      });
+      }
+    }
+
+    if (!result.length) {
+      return words.map((w) => ({
+        term: w,
+        translation: w,
+        synonyms: [],
+      }));
     }
 
     return result;
@@ -267,65 +378,87 @@ export class AiService {
       ageGroup,
     });
 
-    const raw = await this.chat(prompt);
+    const { questionType: expectedQt, answersCount: expectedAnswers } =
+      this.expectedShapeByTrainingType(trainingType);
 
-    const arr = this.safeParseJsonArray(raw);
-    if (!arr) {
-      this.logger.error('Failed to parse assignment JSON from AI', raw);
-      return [];
-    }
+    const attemptOnce = (raw: string): AiQuestion[] => {
+      const parsed = this.safeParseJsonArray(raw);
+      if (!parsed || !this.isAiQuestionArray(parsed)) return [];
 
-    if (!this.isAiQuestionArray(arr)) {
-      this.logger.error('AI returned JSON but not questions array', raw);
-      return [];
-    }
+      const result: AiQuestion[] = [];
 
-    const result: AiQuestion[] = [];
+      for (const item of parsed) {
+        const question = this.normalizeQuestionText(item.question);
+        if (!question) continue;
 
-    arr.forEach((item) => {
-      const question = this.normalizeQuestionText(item.question);
-      if (!question) return;
+        if (
+          !this.isQuestionTypeAllowedForTraining(
+            trainingType,
+            item.questionType,
+          )
+        ) {
+          continue;
+        }
 
-      const questionType =
-        item.questionType === 'multiple_choice' ||
-        item.questionType === 'gap_fill' ||
-        item.questionType === 'open_text'
-          ? item.questionType
-          : 'multiple_choice';
+        const answersRaw = Array.isArray(item.answers) ? item.answers : [];
+        let answers = this.normalizeAnswers(
+          answersRaw.map((a) => ({
+            text: (a as any)?.text,
+            isCorrect: (a as any)?.isCorrect,
+          })),
+        );
 
-      const answersRaw = Array.isArray(item.answers) ? item.answers : [];
-      let answers = this.normalizeAnswers(
-        answersRaw.map((a) => ({
-          text: (a as any)?.text,
-          isCorrect: (a as any)?.isCorrect,
-        })),
-      );
+        answers = this.enforceAnswerCount(answers, expectedAnswers);
+        if (!answers.length) continue;
 
-      if (trainingType === 'phrase_fail') {
-        answers = this.enforceAnswerCount(answers, 3);
-      } else if (questionType === 'multiple_choice') {
-        if (answers.length < 3) return;
-      } else {
-        if (answers.length < 1) return;
+        answers = this.ensureExactlyOneCorrect(answers);
+
+        const explanation = this.normalizeExplanation(item.explanation);
+
+        result.push({
+          question,
+          questionType: expectedQt,
+          answers,
+          ...(explanation ? { explanation } : {}),
+        });
+
+        if (result.length >= questionsCount) break;
       }
 
-      if (!answers.length) return;
+      return result;
+    };
 
-      answers = this.ensureExactlyOneCorrect(answers);
+    const raw1 = await this.chat([{ role: 'user', content: prompt }]);
+    const res1 = attemptOnce(raw1);
 
-      const explanation =
-        typeof item.explanation === 'string'
-          ? item.explanation.trim()
-          : undefined;
+    if (res1.length === questionsCount) return res1;
 
-      result.push({
-        question,
-        questionType,
-        answers,
-        explanation,
-      });
+    this.logger.warn(
+      `AI generateAssignment incomplete on first try: expected=${questionsCount}, got=${res1.length}, type=${trainingType}`,
+    );
+
+    const repair = this.buildRepairPrompt({
+      trainingType,
+      questionsCount,
+      expectedQt,
+      expectedAnswers,
     });
 
-    return result;
+    const raw2 = await this.chat([
+      { role: 'user', content: prompt },
+      { role: 'assistant', content: raw1 },
+      { role: 'user', content: repair },
+    ]);
+
+    const res2 = attemptOnce(raw2);
+
+    if (res2.length !== questionsCount) {
+      this.logger.error(
+        `AI generateAssignment failed after retry: expected=${questionsCount}, got=${res2.length}, type=${trainingType}`,
+        raw2,
+      );
+    }
+
+    return res2.length >= res1.length ? res2 : res1;
   }
 }
