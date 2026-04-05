@@ -12,35 +12,31 @@ jest.mock('rxjs', () => ({
 describe('TelegramNotificationsService (unit, manual DI)', () => {
   let service: TelegramNotificationsService;
   let httpService: jest.Mocked<HttpService>;
-
-  let warnSpy: jest.SpyInstance;
   let errorSpy: jest.SpyInstance;
 
   const ORIGINAL_ENV = process.env;
+  const mockedFirstValueFrom = firstValueFrom as jest.Mock;
 
   beforeEach(() => {
     process.env = { ...ORIGINAL_ENV };
+
+    process.env.TELEGRAM_BOT_INTERNAL_URL = 'http://telegram-bot:3001';
+    process.env.TELEGRAM_BOT_INTERNAL_TOKEN = 'super-secret';
 
     httpService = {
       post: jest.fn(),
     } as any;
 
-    service = new TelegramNotificationsService(httpService);
-
-    warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
     errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+    service = new TelegramNotificationsService(httpService);
   });
 
   afterEach(() => {
     jest.clearAllMocks();
+    jest.restoreAllMocks();
     process.env = ORIGINAL_ENV;
   });
-
-  const mockedFirstValueFrom = firstValueFrom as jest.Mock;
-
-  // -------------------------------------------------------------------
-  // sendTeacherRequest
-  // -------------------------------------------------------------------
 
   describe('sendTeacherRequest', () => {
     const options = {
@@ -50,27 +46,23 @@ describe('TelegramNotificationsService (unit, manual DI)', () => {
       message: 'Привет, давай заниматься английским?',
     };
 
-    it('should warn and skip when TELEGRAM_BOT_INTERNAL_URL is not configured', async () => {
+    it('should throw when TELEGRAM_BOT_INTERNAL_URL is not configured', () => {
       delete process.env.TELEGRAM_BOT_INTERNAL_URL;
 
-      service = new TelegramNotificationsService(httpService);
-
-      await service.sendTeacherRequest(options);
-
-      expect(warnSpy).toHaveBeenCalledWith(
-        'TELEGRAM_BOT_INTERNAL_URL is not configured, skipping notify',
+      expect(() => new TelegramNotificationsService(httpService)).toThrow(
+        'TELEGRAM_BOT_INTERNAL_URL is missing',
       );
-      expect(httpService.post).not.toHaveBeenCalled();
-      expect(mockedFirstValueFrom).not.toHaveBeenCalled();
+    });
+
+    it('should throw when TELEGRAM_BOT_INTERNAL_TOKEN is not configured', () => {
+      delete process.env.TELEGRAM_BOT_INTERNAL_TOKEN;
+
+      expect(() => new TelegramNotificationsService(httpService)).toThrow(
+        'TELEGRAM_BOT_INTERNAL_TOKEN is missing',
+      );
     });
 
     it('should call http.post with correct URL, payload and headers', async () => {
-      process.env.TELEGRAM_BOT_INTERNAL_URL = 'http://telegram-bot:3001';
-      process.env.TELEGRAM_BOT_INTERNAL_TOKEN = 'super-secret';
-
-      // пересоздаём сервис после установки env
-      service = new TelegramNotificationsService(httpService);
-
       const mockObservable = {} as any;
       httpService.post.mockReturnValueOnce(mockObservable);
       mockedFirstValueFrom.mockResolvedValueOnce(undefined);
@@ -98,11 +90,6 @@ describe('TelegramNotificationsService (unit, manual DI)', () => {
     });
 
     it('should log error if http call fails but not throw', async () => {
-      process.env.TELEGRAM_BOT_INTERNAL_URL = 'http://telegram-bot:3001';
-      process.env.TELEGRAM_BOT_INTERNAL_TOKEN = 'super-secret';
-
-      service = new TelegramNotificationsService(httpService);
-
       const mockObservable = {} as any;
       httpService.post.mockReturnValueOnce(mockObservable);
       mockedFirstValueFrom.mockRejectedValueOnce(new Error('boom'));
@@ -113,9 +100,7 @@ describe('TelegramNotificationsService (unit, manual DI)', () => {
 
       expect(httpService.post).toHaveBeenCalled();
       expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining(
-          'Telegram notify failed (/internal/teacher-request): boom',
-        ),
+        'Telegram notify failed (/internal/teacher-request): boom',
       );
     });
   });
