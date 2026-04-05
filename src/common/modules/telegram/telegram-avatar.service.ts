@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import axios from 'axios';
 import { TelegramApiService } from './telegram-api.service';
-import { StorageService } from 'storage/storage.service';
+import { StorageService } from 'common/modules/storage/storage.service';
 
 @Injectable()
 export class TelegramAvatarService {

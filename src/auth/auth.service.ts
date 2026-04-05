@@ -1,14 +1,14 @@
 import {
-  Injectable,
   BadRequestException,
-  UnauthorizedException,
   ForbiddenException,
+  Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import * as argon from 'argon2';
 import { randomUUID } from 'crypto';
 import { JwtService } from '@nestjs/jwt';
-import { MailService } from '../mail/mail.service';
+import { MailService } from 'common/modules/mail/mail.service';
 import { RegisterDto } from './dto/register.dto/register.dto';
 import { UserRepository } from 'repositories/user.repository';
 import { ContactTypeRepository } from 'repositories/contact-type.repository';
@@ -16,7 +16,7 @@ import { RoleRepository } from 'repositories/role.repository';
 import { UserContactRepository } from 'repositories/user-contact.repository';
 import { LoginrDto } from './dto/login.dto/login.dto';
 import { RegisterTelegramDto } from './dto/register-telegram.dto/register-telegram.dto';
-import { TelegramAvatarService } from 'telegram/telegram-avatar.service';
+import { TelegramAvatarService } from 'common/modules/telegram/telegram-avatar.service';
 
 @Injectable()
 export class AuthService {
@@ -65,7 +65,7 @@ export class AuthService {
 
   async registerTelegram(dto: RegisterTelegramDto) {
     const existing = await this.userContactRepo.findByTelegram(dto.telegramId);
-    if (existing) throw new BadRequestException('Username already exists');
+    if (existing) throw new BadRequestException('Telegram user already exists');
 
     const role = await this.roleRepo.findGlobalRole('student');
 
@@ -75,13 +75,24 @@ export class AuthService {
     if (!contactType)
       throw new BadRequestException('Telegram contact type not found');
 
-    const avatarUrl = this.telegramAvatarService
-      ? await this.telegramAvatarService.saveTelegramAvatarByTelegramId(
-          dto.telegramId,
-        )
-      : null;
+    let avatarUrl: string | null;
 
-    const user = await this.userRepo.createUserByTelegram({
+    try {
+      avatarUrl = this.telegramAvatarService
+        ? await this.telegramAvatarService.saveTelegramAvatarByTelegramId(
+            dto.telegramId,
+          )
+        : null;
+    } catch (e) {
+      console.warn('Telegram avatar fetch failed', {
+        telegramId: dto.telegramId,
+        message: e instanceof Error ? e.message : String(e),
+        stack: e instanceof Error ? e.stack : null,
+      });
+      avatarUrl = null;
+    }
+
+    return await this.userRepo.createUserByTelegram({
       firstName: dto.firstName,
       lastName: dto.lastName,
       roleId: role.id,
@@ -90,8 +101,6 @@ export class AuthService {
       contactTypeId: contactType.id,
       avatarUrl,
     });
-
-    return user;
   }
 
   async activate(token: string) {
@@ -166,7 +175,7 @@ export class AuthService {
     const refreshHash = await argon.hash(refreshToken);
     await this.userRepo.updateRefreshTokenHash(user.id, refreshHash);
 
-    const response = {
+    return {
       accessToken,
       refreshToken,
       user: {
@@ -175,7 +184,6 @@ export class AuthService {
         email,
       },
     };
-    return response;
   }
 
   async logout(userId: number) {

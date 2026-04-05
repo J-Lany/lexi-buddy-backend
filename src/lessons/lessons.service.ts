@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from 'prisma/prisma.service';
+import { PrismaService } from 'common/modules/prisma/prisma.service';
 import { LessonRepository } from 'repositories/lesson.repository';
 import { AssignmentRepository } from 'repositories/assignment.repository';
 import { AiService } from 'ai/ai.service';
@@ -20,7 +20,7 @@ import { TrainingTypeKey } from 'ai/prompts';
 import { LessonSummaryDto } from './dto/lesson-summary.dto';
 import { LessonDetailsDto } from './dto/lesson-details.dto';
 import { DONE_STATUSES } from 'common/constants/student-assignment';
-import { TelegramNotificationsService } from 'notifications/telegram-notifications.service';
+import { TelegramNotificationsService } from 'common/modules/notifications/telegram-notifications.service';
 
 @Injectable()
 export class LessonsService {

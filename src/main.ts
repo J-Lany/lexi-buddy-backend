@@ -1,13 +1,38 @@
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
+import { AppModule } from 'app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
+import pinoHttp from 'pino-http';
+import { AppRequest } from 'common/types/http';
+import { ActivityService } from 'common/modules/activity/activity.service';
+import { LastVisitInterceptor } from 'auth/interceptors/last-visit.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  const activity = app.get(ActivityService);
+  app.useGlobalInterceptors(new LastVisitInterceptor(activity));
   app.use(cookieParser());
+
+  app.use(
+    pinoHttp<AppRequest, Response>({
+      customProps: (req) => ({
+        env: process.env.APP_ENV ?? 'loval',
+        service: process.env.SERVICE_NAME ?? 'backend',
+        request_id: req.requestId ?? null,
+        user_id: req.user?.id ?? null,
+      }),
+      serializers: {
+        req(req) {
+          return { method: req.method, url: req.url };
+        },
+        res(res) {
+          return { statusCode: res.statusCode };
+        },
+      },
+    }),
+  );
 
   const origins = process.env.CORS_ORIGINS
     ? process.env.CORS_ORIGINS.split(',')
@@ -16,7 +41,13 @@ async function bootstrap() {
   app.enableCors({
     origin: origins,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-internal-token'],
+    exposedHeaders: ['X-Request-Id'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-internal-token',
+      'x-request-id',
+    ],
     credentials: true,
   });
 

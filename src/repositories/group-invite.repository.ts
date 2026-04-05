@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from 'prisma/prisma.service';
+import { PrismaService } from 'common/modules/prisma/prisma.service';
 import { GroupInviteStatus } from '@prisma/client';
 
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
