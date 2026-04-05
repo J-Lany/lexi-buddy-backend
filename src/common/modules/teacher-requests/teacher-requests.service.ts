@@ -7,7 +7,7 @@ import {
 import { RoleRepository } from 'repositories/role.repository';
 import { UserRepository } from 'repositories/user.repository';
 import { GroupInviteRepository } from 'repositories/group-invite.repository';
-import { TelegramNotificationsService } from 'notifications/telegram-notifications.service';
+import { TelegramNotificationsService } from 'common/modules/notifications/telegram-notifications.service';
 import { CreateTeacherRequestDto } from './dto/create-teacher-request.dto';
 import {
   RespondTeacherRequestDto,

@@ -5,7 +5,7 @@ import { TeacherRequestsService } from './teacher-requests.service';
 import { RoleRepository } from 'repositories/role.repository';
 import { UserRepository } from 'repositories/user.repository';
 import { GroupInviteRepository } from 'repositories/group-invite.repository';
-import { TelegramNotificationsService } from 'notifications/telegram-notifications.service';
+import { TelegramNotificationsService } from 'common/modules/notifications/telegram-notifications.service';
 import { GroupInviteStatus } from '@prisma/client';
 import { TeacherRequestAction } from './dto/respond-teacher-request.dto';
 

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 
 import { AuthService } from './auth.service';
-import { MailService } from '../mail/mail.service';
+import { MailService } from 'common/modules/mail/mail.service';
 import { UserRepository } from 'repositories/user.repository';
 import { RoleRepository } from 'repositories/role.repository';
 import { ContactTypeRepository } from 'repositories/contact-type.repository';

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from 'prisma/prisma.service';
+import { PrismaService } from 'common/modules/prisma/prisma.service';
 import { StudentAttemptStatus } from '@prisma/client';
 
 type SaveAttemptInput = {
@@ -76,6 +76,7 @@ export class StudentBotInternalRepository {
         lastName: true,
         level: true,
         ageGroup: true,
+        id: true,
         groupMemberships: {
           where: {
             isActive: true,
@@ -96,6 +97,7 @@ export class StudentBotInternalRepository {
       level: user.level ?? null,
       ageGroup: user.ageGroup ?? null,
       groupsCount: user.groupMemberships?.length ?? 0,
+      id: user.id,
     };
   }
 
@@ -257,6 +259,19 @@ export class StudentBotInternalRepository {
     });
 
     return { studentAssignment: created, assignment: payload };
+  }
+
+  async isAssignmentAssignedToStudent(userId: number, assignmentId: number) {
+    const row = await this.prisma.studentAssignedAssignment.findFirst({
+      where: {
+        userId,
+        assignmentId,
+        revokedAt: null,
+      },
+      select: { id: true },
+    });
+
+    return Boolean(row);
   }
 
   async saveAttemptResultsAndComplete(input: SaveAttemptInput) {

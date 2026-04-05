@@ -8,20 +8,21 @@ export class TelegramNotificationsService {
   private readonly botBaseUrl = process.env.TELEGRAM_BOT_INTERNAL_URL;
   private readonly internalToken = process.env.TELEGRAM_BOT_INTERNAL_TOKEN;
 
-  constructor(private readonly http: HttpService) {}
-
-  private async postInternal(path: string, payload: unknown): Promise<void> {
+  constructor(private readonly http: HttpService) {
     if (!this.botBaseUrl) {
-      this.logger.warn(
-        'TELEGRAM_BOT_INTERNAL_URL is not configured, skipping notify',
-      );
-      return;
+      throw new Error('TELEGRAM_BOT_INTERNAL_URL is missing');
     }
 
+    if (!this.internalToken) {
+      throw new Error('TELEGRAM_BOT_INTERNAL_TOKEN is missing');
+    }
+  }
+
+  private async postInternal(path: string, payload: unknown): Promise<void> {
     try {
       await firstValueFrom(
         this.http.post(`${this.botBaseUrl}${path}`, payload, {
-          headers: { 'x-internal-token': this.internalToken ?? '' },
+          headers: { 'x-internal-token': this.internalToken },
           timeout: 5000,
         }),
       );

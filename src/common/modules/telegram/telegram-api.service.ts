@@ -80,8 +80,6 @@ export class TelegramApiService {
       return null;
     }
 
-    const url = `${this.fileBase}/${filePath}`;
-
-    return url;
+    return `${this.fileBase}/${filePath}`;
   }
 }

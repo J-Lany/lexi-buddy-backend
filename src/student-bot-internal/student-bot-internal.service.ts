@@ -1,14 +1,20 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { StudentBotInternalRepository } from '../repositories/student-bot-internal.repository';
+import { StudentBotInternalRepository } from 'repositories/student-bot-internal.repository';
 import { SubmitAssignmentInternalDto } from './dto/submit-assignment-internal.dto';
+import { ActivityService } from 'common/modules/activity/activity.service';
 
 @Injectable()
 export class StudentBotInternalService {
-  constructor(private readonly repo: StudentBotInternalRepository) {}
+  constructor(
+    private readonly repo: StudentBotInternalRepository,
+    private readonly activity: ActivityService,
+  ) {}
 
   async getStudentLessonsByTelegramId(telegramId: number) {
     const studentId = await this.repo.findStudentIdByTelegramId(telegramId);
     if (!studentId) throw new NotFoundException('Student not found');
+
+    await this.activity.touchUserLastVisit(studentId);
 
     const lessons = await this.repo.findLessonsForStudent(studentId);
 
@@ -25,6 +31,8 @@ export class StudentBotInternalService {
   async getStudentProfileByTelegramId(telegramId: number) {
     const profile = await this.repo.findStudentProfileByTelegramId(telegramId);
     if (!profile) throw new NotFoundException('Student not found');
+
+    await this.activity.touchUserLastVisit(profile.id);
 
     return profile;
   }
@@ -55,6 +63,12 @@ export class StudentBotInternalService {
     const studentId = await this.repo.findStudentIdByTelegramId(telegramId);
     if (!studentId) throw new NotFoundException('Student not found');
 
+    const assigned = await this.repo.isAssignmentAssignedToStudent(
+      studentId,
+      assignmentId,
+    );
+    if (!assigned) throw new NotFoundException('Assignment not found');
+
     const assignment = await this.repo.getAssignmentPayload(assignmentId);
     if (!assignment) throw new NotFoundException('Assignment not found');
 
@@ -67,6 +81,8 @@ export class StudentBotInternalService {
   ) {
     const studentId = await this.repo.findStudentIdByTelegramId(telegramId);
     if (!studentId) throw new NotFoundException('Student not found');
+
+    await this.activity.touchUserLastVisit(studentId);
 
     const data = await this.repo.createNewAttemptAndGetPayload(
       studentId,
