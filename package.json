@@ -20,9 +20,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prepare": "husky",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
-    "migrate:staging": "DATABASE_URL=$DATABASE_URL prisma migrate dev",
-    "deploy:prod": "DATABASE_URL=$DATABASE_URL NODE_ENV=production prisma migrate deploy && NODE_ENV=production npm run seed",
-    "deploy:staging": "DATABASE_URL=$DATABASE_URL NODE_ENV=development prisma migrate deploy && NODE_ENV=development npm run seed",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
     "generate": "prisma generate",
     "seed": "ts-node prisma/seed.ts",
     "cleanup": "ts-node src/common/modules/prisma/cleanup.ts"

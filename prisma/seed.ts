@@ -275,7 +275,7 @@ async function main() {
   await seedCore();
 
   // best practice: explicit flag for test data
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env.SEED_TEST_DATA === 'true') {
     await seedTestData();
   } else {
     console.log('SEED_TEST_DATA!=true, skipping test data');
