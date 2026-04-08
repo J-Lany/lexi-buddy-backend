@@ -3,41 +3,35 @@ FROM node:20-bookworm-slim AS build
 
 WORKDIR /app
 
-# 1. Устанавливаем зависимости
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
-# 2. Копируем исходники и Prisma schema
-COPY . .
-
-# 3. Генерируем Prisma клиент с бинарями для Alpine
+COPY prisma ./prisma
 RUN npx prisma generate
 
-# 4. Собираем проект NestJS
+COPY . .
 RUN npm run build
 
 
-# --- Stage 2: production ---
-FROM node:20-alpine AS prod
+# --- Stage 2: runtime ---
+FROM node:20-bookworm-slim AS prod
 
 WORKDIR /app
 
-# 5. Устанавливаем нужные библиотеки (Prisma runtime требует OpenSSL3 и ICU)
-RUN apk add --no-cache openssl3 icu-data-full icu-libs
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package*.json ./
+RUN HUSKY=0 npm ci
+
+COPY prisma ./prisma
+RUN npx prisma generate
+
+COPY --from=build /app/dist ./dist
 
 ENV NODE_ENV=production
 
-# 6. Копируем package.json и ставим прод-зависимости
-COPY package*.json ./
-RUN npm ci --omit=dev --ignore-scripts
-
-# 7. Копируем Prisma schema и бинарники
-COPY --from=build /app/prisma ./prisma
-COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
-
-# 8. Копируем собранный билд
-COPY --from=build /app/dist ./dist
-
-EXPOSE 4001
+EXPOSE 4000
 
 CMD ["node", "dist/main.js"]
