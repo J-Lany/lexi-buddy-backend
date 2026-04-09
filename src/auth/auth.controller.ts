@@ -28,6 +28,7 @@ import { LoginrDto } from './dto/login.dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { JwtPayload } from './types/jwt-payload.type';
+import { getAuthCookieOptions } from 'auth/utils/auth-cookie.util';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -65,7 +66,7 @@ export class AuthController {
   }
 
   @Post('login')
-  @ApiOperation({ summary: 'Register user using email & password' })
+  @ApiOperation({ summary: 'Login user using email & password' })
   @ApiBadRequestResponse({ description: 'Wrong email or password' })
   async login(
     @Body() dto: LoginrDto,
@@ -74,18 +75,15 @@ export class AuthController {
     const { user, accessToken, refreshToken } =
       await this.authService.login(dto);
 
+    const cookieOptions = getAuthCookieOptions();
+
     res.cookie('access_token', accessToken, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      ...cookieOptions,
       maxAge: 15 * 60 * 1000,
     });
 
     res.cookie('refresh_token', refreshToken, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
+      ...cookieOptions,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -109,19 +107,15 @@ export class AuthController {
 
     const { accessToken, refreshToken: newRefreshToken } =
       await this.authService.refresh(refreshToken);
+    const cookieOptions = getAuthCookieOptions();
 
     res.cookie('access_token', accessToken, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 15 * 60 * 1000, // 15m
+      ...cookieOptions,
+      maxAge: 15 * 60 * 1000,
     });
 
     res.cookie('refresh_token', newRefreshToken, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
+      ...cookieOptions,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -154,15 +148,11 @@ export class AuthController {
   ) {
     await this.authService.logout(user.sub);
 
-    res.cookie('access_token', '', {
-      httpOnly: true,
-      expires: new Date(0),
-    });
+    const cookieOptions = getAuthCookieOptions();
 
-    res.cookie('refresh_token', '', {
-      httpOnly: true,
-      expires: new Date(0),
-      path: '/',
-    });
+    res.clearCookie('access_token', cookieOptions);
+    res.clearCookie('refresh_token', cookieOptions);
+
+    return { message: 'Logged out' };
   }
 }
