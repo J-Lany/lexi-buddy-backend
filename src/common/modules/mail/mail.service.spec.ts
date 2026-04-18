@@ -1,21 +1,54 @@
+import { InternalServerErrorException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { MailService } from './mail.service';
-import { MailerService } from '@nestjs-modules/mailer';
+import { Resend } from 'resend';
+import { MailService, RESEND_CLIENT } from './mail.service';
 
 describe('MailService', () => {
   let service: MailService;
-  let mockMailerService: { sendMail: jest.Mock };
+  let mockResendClient: {
+    emails: {
+      send: jest.Mock;
+    };
+  };
+
+  const env = {
+    RESEND_API_KEY: 're_test_key',
+    MAIL_FROM: 'Lexi Buddy <no-reply@auth.lexi-buddy.com>',
+    ACTIVATION_URL: 'https://api.lexi-buddy.com/auth/activate',
+  };
 
   beforeEach(async () => {
-    // Мокаем MailerService
-    mockMailerService = {
-      sendMail: jest.fn(),
+    mockResendClient = {
+      emails: {
+        send: jest.fn(),
+      },
+    };
+
+    const mockConfigService = {
+      getOrThrow: jest.fn((key: string) => {
+        const value = env[key as keyof typeof env];
+
+        if (!value) {
+          throw new Error(`${key} is not set`);
+        }
+
+        return value;
+      }),
+      get: jest.fn(() => undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MailService,
-        { provide: MailerService, useValue: mockMailerService },
+        {
+          provide: RESEND_CLIENT,
+          useValue: mockResendClient as unknown as Resend,
+        },
+        {
+          provide: ConfigService,
+          useValue: mockConfigService,
+        },
       ],
     }).compile();
 
@@ -26,35 +59,66 @@ describe('MailService', () => {
     jest.clearAllMocks();
   });
 
-  it('should call mailer.sendMail with correct arguments', async () => {
-    process.env.ACTIVATION_URL = 'https://example.com/activate';
+  it('should send activation email with correct payload', async () => {
+    mockResendClient.emails.send.mockResolvedValue({
+      data: { id: 'email_123' },
+      error: null,
+    });
+
     const email = 'user@example.com';
     const token = '12345';
 
     await service.sendActivationMail(email, token);
 
-    expect(mockMailerService.sendMail).toHaveBeenCalledTimes(1);
-    expect(mockMailerService.sendMail).toHaveBeenCalledWith({
-      to: email,
-      subject: 'Activate your Lexi Buddy account',
-      html: expect.stringContaining(
-        `https://example.com/activate?token=${token}`,
-      ),
-    });
+    expect(mockResendClient.emails.send).toHaveBeenCalledTimes(1);
+
+    const payload = mockResendClient.emails.send.mock.calls[0][0];
+
+    expect(payload.from).toBe(env.MAIL_FROM);
+    expect(payload.to).toBe(email);
+    expect(payload.subject).toBe('Activate your Lexi Buddy account');
+    expect(payload.html).toContain(
+      'https://api.lexi-buddy.com/auth/activate?token=12345',
+    );
+    expect(payload.text).toContain(
+      'https://api.lexi-buddy.com/auth/activate?token=12345',
+    );
+    expect(payload.attachments).toEqual([
+      expect.objectContaining({
+        filename: 'lexi-buddy-icon.png',
+        contentId: 'lexi-logo',
+      }),
+    ]);
   });
 
-  it('should include activation link with token in the html body', async () => {
-    process.env.ACTIVATION_URL = 'https://activate.lexi-buddy.io';
-    const email = 'someone@mail.com';
-    const token = 'abc123';
+  it('should preserve token value correctly in activation URL', async () => {
+    mockResendClient.emails.send.mockResolvedValue({
+      data: { id: 'email_456' },
+      error: null,
+    });
 
-    await service.sendActivationMail(email, token);
+    const token = 'abc 123/+?=';
 
-    const callArgs = mockMailerService.sendMail.mock.calls[0][0];
+    await service.sendActivationMail('someone@example.com', token);
 
-    expect(callArgs.html).toContain(`?token=${token}`);
-    expect(callArgs.html).toContain(
-      `<a href="https://activate.lexi-buddy.io?token=${token}">`,
-    );
+    const payload = mockResendClient.emails.send.mock.calls[0][0];
+    const urlFromText = payload.text.split('\n').at(-1);
+
+    expect(urlFromText).toBeDefined();
+
+    const url = new URL(urlFromText as string);
+
+    expect(url.searchParams.get('token')).toBe(token);
+  });
+
+  it('should throw InternalServerErrorException when resend returns an error', async () => {
+    mockResendClient.emails.send.mockResolvedValue({
+      data: null,
+      error: { message: 'provider failed' },
+    });
+
+    await expect(
+      service.sendActivationMail('user@example.com', 'token'),
+    ).rejects.toBeInstanceOf(InternalServerErrorException);
   });
 });
