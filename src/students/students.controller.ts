@@ -6,6 +6,7 @@ import {
   Query,
   Param,
   Body,
+  Delete,
   ParseIntPipe,
 } from '@nestjs/common';
 import {
@@ -91,5 +92,17 @@ export class StudentsController {
     const studentId = Number(id);
 
     return this.studentsService.updateStudentProfile(teacherId, studentId, dto);
+  }
+
+  @Delete(':id/relationship')
+  @ApiOperation({ summary: 'Remove student from current teacher' })
+  @ApiOkResponse({ description: 'Student detached from current teacher' })
+  async removeStudentRelationship(
+    @Param('id', ParseIntPipe) studentId: number,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const teacherId = user.sub;
+
+    return this.studentsService.removeStudentFromTeacher(teacherId, studentId);
   }
 }

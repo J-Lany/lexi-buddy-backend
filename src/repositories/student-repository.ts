@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'common/modules/prisma/prisma.service';
-import { Prisma } from '@prisma/client';
+import { GroupInviteStatus, Prisma } from '@prisma/client';
+
+export type DetachStudentFromTeacherResult = {
+  removedFromGroups: number;
+  revokedAssignments: number;
+  expiredPendingInvites: number;
+  affectedGroupIds: number[];
+};
 
 @Injectable()
 export class StudentsRepository {
@@ -247,5 +254,94 @@ export class StudentsRepository {
     });
 
     return res.count > 0;
+  }
+
+  async detachStudentFromTeacher(params: {
+    teacherId: number;
+    studentId: number;
+  }): Promise<DetachStudentFromTeacherResult> {
+    const { teacherId, studentId } = params;
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      const affectedGroups = await tx.group.findMany({
+        where: {
+          AND: [
+            {
+              members: {
+                some: {
+                  userId: teacherId,
+                  isActive: true,
+                  role: { name: 'teacher' },
+                },
+              },
+            },
+            {
+              members: {
+                some: {
+                  userId: studentId,
+                  isActive: true,
+                  role: { name: 'student' },
+                },
+              },
+            },
+          ],
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      const affectedGroupIds = affectedGroups.map((group) => group.id);
+
+      const removedMemberships = affectedGroupIds.length
+        ? await tx.groupMember.updateMany({
+            where: {
+              groupId: { in: affectedGroupIds },
+              userId: studentId,
+              isActive: true,
+              role: { name: 'student' },
+            },
+            data: {
+              isActive: false,
+              removedAt: now,
+            },
+          })
+        : { count: 0 };
+
+      const revokedAssignments = await tx.studentAssignedAssignment.updateMany({
+        where: {
+          userId: studentId,
+          revokedAt: null,
+          assignment: {
+            lesson: {
+              createdById: teacherId,
+            },
+          },
+        },
+        data: {
+          revokedAt: now,
+        },
+      });
+
+      const expiredPendingInvites = await tx.groupInvite.updateMany({
+        where: {
+          inviterId: teacherId,
+          inviteeId: studentId,
+          status: GroupInviteStatus.PENDING,
+        },
+        data: {
+          status: GroupInviteStatus.EXPIRED,
+          respondedAt: now,
+        },
+      });
+
+      return {
+        removedFromGroups: removedMemberships.count,
+        revokedAssignments: revokedAssignments.count,
+        expiredPendingInvites: expiredPendingInvites.count,
+        affectedGroupIds,
+      };
+    });
   }
 }

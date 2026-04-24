@@ -89,12 +89,25 @@ export class GroupInviteRepository {
   }) {
     const { groupId, studentId, studentGroupRoleId } = args;
 
-    return this.prisma.groupMember.create({
-      data: {
+    return this.prisma.groupMember.upsert({
+      where: {
+        groupId_userId: {
+          groupId,
+          userId: studentId,
+        },
+      },
+      create: {
         groupId,
         userId: studentId,
         roleId: studentGroupRoleId,
         isActive: true,
+        removedAt: null,
+      },
+      update: {
+        roleId: studentGroupRoleId,
+        isActive: true,
+        removedAt: null,
+        joinedAt: new Date(),
       },
     });
   }
