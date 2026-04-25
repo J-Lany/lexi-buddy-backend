@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiOperation,
+  ApiQuery,
   ApiTags,
   ApiBearerAuth,
   ApiOkResponse,
@@ -43,6 +44,7 @@ export class StudentsController {
 
   @Get('search')
   @ApiOperation({ summary: 'Search students by username' })
+  @ApiQuery({ name: 'q', type: String, required: true })
   @ApiOkResponse({ description: 'List of matching students' })
   async searchStudents(@Query('q') q: string, @CurrentUser() user: JwtPayload) {
     const teacherId = user.sub;
@@ -66,12 +68,11 @@ export class StudentsController {
     description: 'Student lesson progress with attempts & answers',
   })
   async getStudentLessonProgress(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseIntPipe) studentId: number,
     @Param('lessonId', ParseIntPipe) lessonId: number,
     @CurrentUser() user: JwtPayload,
   ) {
     const teacherId = user.sub;
-    const studentId = id;
 
     return this.studentsService.getStudentLessonProgress(
       teacherId,
@@ -84,12 +85,11 @@ export class StudentsController {
   @ApiOperation({ summary: 'Update student profile (for current teacher)' })
   @ApiOkResponse({ description: 'Updated student profile' })
   async updateStudent(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) studentId: number,
     @Body() dto: UpdateStudentDto,
     @CurrentUser() user: JwtPayload,
   ) {
     const teacherId = user.sub;
-    const studentId = Number(id);
 
     return this.studentsService.updateStudentProfile(teacherId, studentId, dto);
   }
