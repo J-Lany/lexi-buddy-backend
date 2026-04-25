@@ -19,6 +19,7 @@ import { AssignLessonDto } from './dto/assign-lesson.dto';
 import { TrainingTypeKey } from 'ai/prompts';
 import { LessonSummaryDto } from './dto/lesson-summary.dto';
 import { LessonDetailsDto } from './dto/lesson-details.dto';
+import { DeleteLessonScope } from './dto/delete-lesson.dto';
 import { DONE_STATUSES } from 'common/constants/student-assignment';
 import { TelegramNotificationsService } from 'common/modules/notifications/telegram-notifications.service';
 
@@ -308,6 +309,25 @@ export class LessonsService {
       typeId,
       questions,
     });
+  }
+
+  async deleteLesson(
+    lessonId: number,
+    teacherId: number,
+    scope: DeleteLessonScope,
+  ): Promise<{ ok: boolean }> {
+    const lesson = await this.lessonRepo.findCreatorById(lessonId);
+    if (!lesson) throw new NotFoundException('Lesson not found');
+
+    this.ensureLessonOwner(lesson.createdById, teacherId);
+
+    if (scope === DeleteLessonScope.ME) {
+      await this.lessonRepo.archiveLesson(lessonId);
+    } else {
+      await this.lessonRepo.hardDeleteLesson(lessonId);
+    }
+
+    return { ok: true };
   }
 
   async assignLesson(
