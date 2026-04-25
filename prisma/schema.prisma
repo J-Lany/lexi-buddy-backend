@@ -345,7 +345,7 @@ model Result {
   createdAt      DateTime @default(now())
 
   attempt  StudentAssignmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-  question AssignmentQuestion       @relation(fields: [questionId], references: [id])
+  question AssignmentQuestion       @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
   @@index([attemptId])
   @@index([questionId])

@@ -123,6 +123,19 @@ export class LessonRepository {
 
   async hardDeleteLesson(lessonId: number): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
+      const questionIds = (
+        await tx.assignmentQuestion.findMany({
+          where: { assignment: { lessonId } },
+          select: { id: true },
+        })
+      ).map((q) => q.id);
+
+      if (questionIds.length) {
+        await tx.result.deleteMany({
+          where: { questionId: { in: questionIds } },
+        });
+      }
+
       await tx.assignment.deleteMany({ where: { lessonId } });
       await tx.lesson.delete({ where: { id: lessonId } });
     });
