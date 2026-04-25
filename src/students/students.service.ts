@@ -429,4 +429,17 @@ export class StudentsService {
 
     return { ok: true };
   }
+
+  async removeStudentFromTeacher(teacherId: number, studentId: number) {
+    const canSee = await this.groupRepo.teacherHasStudent(teacherId, studentId);
+
+    if (!canSee) {
+      throw new ForbiddenException('No access to this student');
+    }
+
+    return this.studentsRepo.detachStudentFromTeacher({
+      teacherId,
+      studentId,
+    });
+  }
 }

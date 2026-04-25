@@ -1,11 +1,13 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Put,
   ParseIntPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -13,6 +15,7 @@ import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 
@@ -22,6 +25,7 @@ import { CurrentUser } from 'auth/decorators/current-user.decorator';
 import { JwtPayload } from 'auth/types/jwt-payload.type';
 
 import { CreateLessonDto } from './dto/create-lesson.dto';
+import { DeleteLessonDto, DeleteLessonScope } from './dto/delete-lesson.dto';
 import { VocabPreviewDto } from './dto/vocab-preview.dto';
 import { SaveVocabListDto } from './dto/save-vocab-list.dto';
 import { AssignmentPreviewDto } from './dto/assignment-preview.dto';
@@ -141,6 +145,22 @@ export class LessonsController {
   ) {
     const teacherId = user.sub;
     return this.lessonsService.updateAssignments(lessonId, dto, teacherId);
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary: 'Delete a lesson',
+    description:
+      '`scope=me` — archive for teacher only (students keep their assignments). `scope=all` — permanently delete for everyone.',
+  })
+  @ApiQuery({ name: 'scope', enum: DeleteLessonScope, required: true })
+  @ApiOkResponse({ schema: { example: { ok: true } } })
+  async deleteLesson(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseIntPipe) lessonId: number,
+    @Query() dto: DeleteLessonDto,
+  ) {
+    return this.lessonsService.deleteLesson(lessonId, user.sub, dto.scope);
   }
 
   @Post(':id/assign')

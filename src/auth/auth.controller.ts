@@ -14,6 +14,7 @@ import {
   ApiBadRequestResponse,
   ApiCreatedResponse,
   ApiOperation,
+  ApiQuery,
   ApiTags,
   ApiBearerAuth,
   ApiOkResponse,
@@ -57,7 +58,8 @@ export class AuthController {
 
   @Get('activate')
   @ApiOperation({ summary: 'Activate user using token' })
-  @ApiCreatedResponse({ description: 'Account activated' })
+  @ApiQuery({ name: 'token', type: String, required: true })
+  @ApiOkResponse({ description: 'Account activated' })
   @ApiBadRequestResponse({ description: 'Missing or invalid token' })
   async activate(@Query('token') token: string) {
     if (!token) throw new BadRequestException('Missing token');
@@ -67,6 +69,7 @@ export class AuthController {
 
   @Post('login')
   @ApiOperation({ summary: 'Login user using email & password' })
+  @ApiOkResponse({ description: 'User info returned, tokens set in cookies' })
   @ApiBadRequestResponse({ description: 'Wrong email or password' })
   async login(
     @Body() dto: LoginrDto,
@@ -124,6 +127,7 @@ export class AuthController {
 
   @Get('by-telegram')
   @ApiOperation({ summary: 'Get user by Telegram ID (for bot)' })
+  @ApiQuery({ name: 'telegramId', type: String, required: true })
   @ApiOkResponse({ description: 'User found' })
   @ApiNotFoundResponse({ description: 'User not found' })
   @ApiBadRequestResponse({ description: 'Invalid telegramId' })

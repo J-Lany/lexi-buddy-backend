@@ -14,6 +14,7 @@ import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiBearerAuth,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 
@@ -34,7 +35,7 @@ export class GroupsController {
   @ApiOperation({
     summary: 'Get all groups associated with the current teacher',
   })
-  @ApiCreatedResponse({
+  @ApiOkResponse({
     description: 'List of groups with their students',
   })
   async getMyGroups(@CurrentUser() user: JwtPayload) {
@@ -95,6 +96,7 @@ export class GroupsController {
   @ApiOperation({
     summary: 'Add a student to an existing group owned by the current teacher',
   })
+  @ApiQuery({ name: 'studentId', type: Number, required: true })
   @ApiCreatedResponse({
     description: 'Student successfully added to the group',
   })
@@ -116,11 +118,10 @@ export class GroupsController {
     description: 'Group base info + students + lessons aggregated progress',
   })
   async getGroupDashboard(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) groupId: number,
     @CurrentUser() user: JwtPayload,
   ) {
     const teacherId = user.sub;
-    const groupId = Number(id);
 
     return this.groupsService.getGroupDashboard(teacherId, groupId);
   }

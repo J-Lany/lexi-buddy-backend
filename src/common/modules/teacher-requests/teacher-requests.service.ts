@@ -120,10 +120,11 @@ export class TeacherRequestsService {
 
     await this.groupInviteRepo.markInviteAccepted(invite.id);
 
-    const existingMember = invite.group.members.find(
-      (m) => m.userId === studentId,
+    const activeMember = invite.group.members.find(
+      (m) => m.userId === studentId && m.isActive,
     );
-    if (!existingMember) {
+
+    if (!activeMember) {
       await this.groupInviteRepo.addStudentToGroup({
         groupId: invite.groupId,
         studentId,

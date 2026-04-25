@@ -90,7 +90,7 @@ export class LessonRepository {
 
   findAllByTeacher(teacherId: number) {
     return this.prisma.lesson.findMany({
-      where: { createdById: teacherId },
+      where: { createdById: teacherId, archived: false },
       include: {
         _count: {
           select: {
@@ -102,6 +102,42 @@ export class LessonRepository {
       orderBy: {
         createdAt: 'desc',
       },
+    });
+  }
+
+  archiveLesson(lessonId: number) {
+    return this.prisma.lesson.update({
+      where: { id: lessonId },
+      data: { archived: true },
+    });
+  }
+
+  findCreatorById(
+    id: number,
+  ): Promise<{ id: number; createdById: number } | null> {
+    return this.prisma.lesson.findUnique({
+      where: { id },
+      select: { id: true, createdById: true },
+    });
+  }
+
+  async hardDeleteLesson(lessonId: number): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const questionIds = (
+        await tx.assignmentQuestion.findMany({
+          where: { assignment: { lessonId } },
+          select: { id: true },
+        })
+      ).map((q) => q.id);
+
+      if (questionIds.length) {
+        await tx.result.deleteMany({
+          where: { questionId: { in: questionIds } },
+        });
+      }
+
+      await tx.assignment.deleteMany({ where: { lessonId } });
+      await tx.lesson.delete({ where: { id: lessonId } });
     });
   }
 }
