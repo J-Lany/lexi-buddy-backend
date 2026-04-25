@@ -341,7 +341,7 @@ describe('TeacherRequestsService (unit, manual DI)', () => {
         expiresAt: null,
         groupId: 100,
         group: {
-          members: [{ userId: studentId }],
+          members: [{ userId: studentId, isActive: true }],
         },
       } as any);
 
