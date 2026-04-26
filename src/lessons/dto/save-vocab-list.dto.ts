@@ -17,9 +17,10 @@ export class SaveVocabItemDto {
   @IsString()
   term!: string;
 
-  @ApiProperty()
+  @ApiProperty({ required: false })
+  @IsOptional()
   @IsString()
-  translation!: string;
+  translation?: string;
 
   @ApiProperty()
   @IsArray()

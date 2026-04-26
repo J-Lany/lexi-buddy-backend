@@ -70,7 +70,7 @@ export class LessonRepository {
 
   async replaceLessonVocab(
     lessonId: number,
-    items: Array<{ term: string; translation: string; synonyms: string[] }>,
+    items: Array<{ term: string; translation?: string; synonyms: string[] }>,
   ): Promise<LessonVocab[]> {
     await this.prisma.lessonVocab.deleteMany({ where: { lessonId } });
 
