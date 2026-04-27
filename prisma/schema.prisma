@@ -16,6 +16,25 @@ datasource db {
 
 // ---------- ENUMS ----------
 
+enum Language {
+  english
+  spanish
+  french
+  german
+  italian
+  chinese
+  japanese
+  korean
+  turkish
+  kazakh
+  russian
+}
+
+enum InstructionLanguage {
+  native
+  target
+}
+
 enum AgeGroup {
   child
   teenager
@@ -67,12 +86,13 @@ model User {
   role   Role @relation(fields: [roleId], references: [id])
   roleId Int
 
-  firstName String?
-  lastName  String?
-  level     Level?
-  ageGroup  AgeGroup?
-  lastVisit DateTime?
-  avatarUrl String?
+  firstName       String?
+  lastName        String?
+  level           Level?
+  ageGroup        AgeGroup?
+  lastVisit       DateTime?
+  avatarUrl       String?
+  defaultLanguage Language  @default(english)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -191,11 +211,14 @@ model GroupInvite {
 // ---------- LESSONS & ASSIGNMENTS ----------
 
 model Lesson {
-  id          Int       @id @default(autoincrement())
-  createdById Int
-  title       String
-  level       Level?
-  ageCategory AgeGroup?
+  id                  Int                 @id @default(autoincrement())
+  createdById         Int
+  title               String
+  targetLanguage      Language            @default(english)
+  nativeLanguage      Language            @default(russian)
+  instructionLanguage InstructionLanguage @default(native)
+  level               Level?
+  ageCategory         AgeGroup?
   topic       String?
   description String?
   createdAt   DateTime  @default(now())

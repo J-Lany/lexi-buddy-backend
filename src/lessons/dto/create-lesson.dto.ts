@@ -1,4 +1,4 @@
-import { AgeGroup, Level } from '@prisma/client';
+import { AgeGroup, InstructionLanguage, Language, Level } from '@prisma/client';
 import {
   IsArray,
   IsEnum,
@@ -16,12 +16,42 @@ export class CreateLessonDto {
   @IsString()
   title!: string;
 
+  @ApiProperty({
+    enum: Language,
+    required: false,
+    default: Language.english,
+    description: 'L2: language being taught',
+  })
+  @IsOptional()
+  @IsEnum(Language)
+  targetLanguage?: Language;
+
+  @ApiProperty({
+    enum: Language,
+    required: false,
+    default: Language.russian,
+    description: 'L1: student native language (used for translations)',
+  })
+  @IsOptional()
+  @IsEnum(Language)
+  nativeLanguage?: Language;
+
+  @ApiProperty({
+    enum: InstructionLanguage,
+    required: false,
+    default: InstructionLanguage.native,
+    description: 'Language for task instructions: native (L1) or target (L2)',
+  })
+  @IsOptional()
+  @IsEnum(InstructionLanguage)
+  instructionLanguage?: InstructionLanguage;
+
   @ApiProperty({ enum: Level, required: false })
   @IsOptional()
   @IsEnum(Level)
   level?: Level;
 
-  @ApiProperty({ enum: AgeGroup, required: true })
+  @ApiProperty({ enum: AgeGroup, required: false })
   @IsOptional()
   @IsEnum(AgeGroup)
   ageCategory?: AgeGroup;

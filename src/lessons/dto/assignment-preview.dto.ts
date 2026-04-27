@@ -1,4 +1,4 @@
-import { AgeGroup, Level } from '@prisma/client';
+import { AgeGroup, InstructionLanguage, Language, Level } from '@prisma/client';
 import {
   IsEnum,
   IsInt,
@@ -37,6 +37,36 @@ export class AssignmentPreviewDto {
   @IsOptional()
   @IsString()
   topic?: string;
+
+  @ApiProperty({
+    enum: Language,
+    required: false,
+    default: Language.english,
+    description: 'L2: language of the target phrases',
+  })
+  @IsOptional()
+  @IsEnum(Language)
+  targetLanguage?: Language;
+
+  @ApiProperty({
+    enum: Language,
+    required: false,
+    default: Language.russian,
+    description: 'L1: translation language',
+  })
+  @IsOptional()
+  @IsEnum(Language)
+  nativeLanguage?: Language;
+
+  @ApiProperty({
+    enum: InstructionLanguage,
+    required: false,
+    default: InstructionLanguage.native,
+    description: 'Language for task instructions',
+  })
+  @IsOptional()
+  @IsEnum(InstructionLanguage)
+  instructionLanguage?: InstructionLanguage;
 
   @ApiProperty({ enum: Level, required: false })
   @IsOptional()

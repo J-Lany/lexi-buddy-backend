@@ -17,6 +17,9 @@ type LessonGroupDto = {
 export type LessonDetailsDto = {
   id: number;
   title: string;
+  targetLanguage: string;
+  nativeLanguage: string;
+  instructionLanguage: string;
   topic: string | null;
   level: string | null;
   ageCategory: string | null;

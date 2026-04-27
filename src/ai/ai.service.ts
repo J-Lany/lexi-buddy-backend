@@ -7,6 +7,7 @@ import { firstValueFrom } from 'rxjs';
 import {
   getAssignmentPrompt,
   getTranslatePrompt,
+  LangContext,
   TrainingTypeKey,
 } from './prompts';
 
@@ -310,7 +311,12 @@ Exercise type: ${trainingType}.
 
   async translateVocab(
     words: string[],
-    meta?: { topic?: string; level?: string | null; ageGroup?: string | null },
+    meta?: {
+      topic?: string;
+      level?: string | null;
+      ageGroup?: string | null;
+      langContext?: LangContext;
+    },
   ): Promise<AiVocabItem[]> {
     const prompt = getTranslatePrompt(words, meta);
     const raw = await this.chat([{ role: 'user', content: prompt }]);
@@ -365,9 +371,17 @@ Exercise type: ${trainingType}.
     topic?: string;
     level?: string | null;
     ageGroup?: string | null;
+    langContext?: LangContext;
   }): Promise<AiQuestion[]> {
-    const { trainingType, terms, questionsCount, topic, level, ageGroup } =
-      params;
+    const {
+      trainingType,
+      terms,
+      questionsCount,
+      topic,
+      level,
+      ageGroup,
+      langContext,
+    } = params;
 
     const prompt = getAssignmentPrompt({
       trainingType,
@@ -376,6 +390,7 @@ Exercise type: ${trainingType}.
       topic,
       level,
       ageGroup,
+      langContext: langContext ?? {},
     });
 
     const { questionType: expectedQt, answersCount: expectedAnswers } =

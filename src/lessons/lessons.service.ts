@@ -4,10 +4,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { InstructionLanguage, Language, Prisma } from '@prisma/client';
 import { PrismaService } from 'common/modules/prisma/prisma.service';
 import { LessonRepository } from 'repositories/lesson.repository';
 import { AssignmentRepository } from 'repositories/assignment.repository';
+import { UserRepository } from 'repositories/user.repository';
 import { AiService } from 'ai/ai.service';
 
 import { CreateLessonDto } from './dto/create-lesson.dto';
@@ -16,7 +17,7 @@ import { SaveVocabListDto } from './dto/save-vocab-list.dto';
 import { AssignmentPreviewDto } from './dto/assignment-preview.dto';
 import { SaveAssignmentDto } from './dto/save-assignment.dto';
 import { AssignLessonDto } from './dto/assign-lesson.dto';
-import { TrainingTypeKey } from 'ai/prompts';
+import { LangContext, TrainingTypeKey } from 'ai/prompts';
 import { LessonSummaryDto } from './dto/lesson-summary.dto';
 import { LessonDetailsDto } from './dto/lesson-details.dto';
 import { DeleteLessonScope } from './dto/delete-lesson.dto';
@@ -30,8 +31,21 @@ export class LessonsService {
     private readonly telegramNotificationsService: TelegramNotificationsService,
     private readonly lessonRepo: LessonRepository,
     private readonly assignmentRepo: AssignmentRepository,
+    private readonly userRepo: UserRepository,
     private readonly ai: AiService,
   ) {}
+
+  private buildLangContext(lesson: {
+    targetLanguage: string;
+    nativeLanguage: string;
+    instructionLanguage: string;
+  }): LangContext {
+    return {
+      targetLanguage: lesson.targetLanguage,
+      nativeLanguage: lesson.nativeLanguage,
+      instructionLanguage: lesson.instructionLanguage,
+    };
+  }
 
   private async getAssignmentTypeIdOrThrow(typeName: string): Promise<number> {
     const assignmentType =
@@ -45,8 +59,18 @@ export class LessonsService {
   }
 
   async createLesson(dto: CreateLessonDto, teacherId: number) {
+    let resolvedTargetLanguage = dto.targetLanguage;
+    if (!resolvedTargetLanguage) {
+      const teacher = await this.userRepo.findById(teacherId);
+      resolvedTargetLanguage = teacher?.defaultLanguage ?? Language.english;
+    }
+
     const lesson = await this.lessonRepo.createLesson({
       title: dto.title,
+      targetLanguage: resolvedTargetLanguage,
+      nativeLanguage: dto.nativeLanguage ?? Language.russian,
+      instructionLanguage:
+        dto.instructionLanguage ?? InstructionLanguage.native,
       topic: dto.topic,
       description: dto.description,
       level: dto.level,
@@ -213,12 +237,21 @@ export class LessonsService {
       })),
     }));
 
+    const l = lesson as typeof lesson & {
+      targetLanguage: string;
+      nativeLanguage: string;
+      instructionLanguage: string;
+    };
+
     return {
-      id: lesson.id,
-      title: lesson.title,
-      topic: lesson.topic,
-      level: lesson.level,
-      ageCategory: lesson.ageCategory,
+      id: l.id,
+      title: l.title,
+      targetLanguage: l.targetLanguage,
+      nativeLanguage: l.nativeLanguage,
+      instructionLanguage: l.instructionLanguage,
+      topic: l.topic,
+      level: l.level,
+      ageCategory: l.ageCategory,
       vocab,
       assignments,
       groups,
@@ -229,15 +262,25 @@ export class LessonsService {
   async getLessonsForTeacher(teacherId: number): Promise<LessonSummaryDto[]> {
     const lessons = await this.lessonRepo.findAllByTeacher(teacherId);
 
-    return lessons.map((lesson) => ({
-      id: lesson.id,
-      title: lesson.title,
-      topic: lesson.topic,
-      level: lesson.level,
-      ageCategory: lesson.ageCategory,
-      vocabCount: lesson._count.vocab,
-      assignmentsCount: lesson._count.assignments,
-    }));
+    return lessons.map((lesson) => {
+      const l = lesson as typeof lesson & {
+        targetLanguage: string;
+        nativeLanguage: string;
+        instructionLanguage: string;
+      };
+      return {
+        id: l.id,
+        title: l.title,
+        targetLanguage: l.targetLanguage,
+        nativeLanguage: l.nativeLanguage,
+        instructionLanguage: l.instructionLanguage,
+        topic: l.topic,
+        level: l.level,
+        ageCategory: l.ageCategory,
+        vocabCount: l._count.vocab,
+        assignmentsCount: l._count.assignments,
+      };
+    });
   }
 
   async vocabPreview(dto: VocabPreviewDto) {
@@ -245,6 +288,11 @@ export class LessonsService {
       topic: dto.topic,
       level: dto.level ?? null,
       ageGroup: dto.ageGroup ?? null,
+      langContext: {
+        targetLanguage: dto.targetLanguage ?? null,
+        nativeLanguage: dto.nativeLanguage ?? null,
+        instructionLanguage: dto.instructionLanguage ?? null,
+      },
     });
   }
 
@@ -276,6 +324,11 @@ export class LessonsService {
       topic: dto.topic,
       level: dto.level,
       ageGroup: dto.ageGroup,
+      langContext: {
+        targetLanguage: dto.targetLanguage ?? null,
+        nativeLanguage: dto.nativeLanguage ?? null,
+        instructionLanguage: dto.instructionLanguage ?? null,
+      },
     });
   }
 
