@@ -10,6 +10,38 @@ export type TrainingTypeKey =
   | 'phrase_fail'
   | 'collocation_check';
 
+export type LangContext = {
+  targetLanguage?: string | null;
+  nativeLanguage?: string | null;
+  instructionLanguage?: string | null;
+};
+
+const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
+  english: 'English',
+  spanish: 'Spanish',
+  french: 'French',
+  german: 'German',
+  italian: 'Italian',
+  chinese: 'Chinese',
+  japanese: 'Japanese',
+  korean: 'Korean',
+  turkish: 'Turkish',
+  kazakh: 'Kazakh',
+  russian: 'Russian',
+};
+
+export function getLanguageDisplayName(language?: string | null): string {
+  if (!language) return 'English';
+  return LANGUAGE_DISPLAY_NAMES[language.toLowerCase()] ?? 'English';
+}
+
+function resolveInstructionLanguageName(ctx: LangContext): string {
+  const isTarget = ctx.instructionLanguage === 'target';
+  return isTarget
+    ? getLanguageDisplayName(ctx.targetLanguage)
+    : getLanguageDisplayName(ctx.nativeLanguage);
+}
+
 export function mapLevelToTraining(
   level?: string | null,
 ): TrainingLevel | undefined {
@@ -21,55 +53,87 @@ export function mapLevelToTraining(
   return undefined;
 }
 
-export const trainingPrompts: Record<
-  TrainingLevel,
-  Record<TrainingAgeGroup, string>
-> = {
-  beginner: {
-    child:
-      'I am a child and a beginner-level student of English. Use only simple, short sentences and clear language appropriate for kids. Choose topics and examples relevant and interesting for children.',
-    teenager:
-      'I am a teenager and a beginner-level student of English. Use simple, short sentences and clear language. Choose topics and examples relevant and interesting for teenagers.',
-    adult:
-      'I am an adult and a beginner-level student of English. Use simple, short sentences and clear language. Choose topics and examples relevant and interesting for adults.',
-  },
-  intermediate: {
-    child:
-      'I am a child and an intermediate-level student of English. Use clear language and vocabulary around intermediate level, appropriate for kids. Choose topics and examples relevant and interesting for children.',
-    teenager:
-      'I am a teenager and an intermediate-level student of English. Use modern, clear English at intermediate level. Choose topics and examples relevant and interesting for teenagers.',
-    adult:
-      'I am an adult and an intermediate-level student of English. Use modern, clear English at intermediate level. Choose topics and examples relevant and interesting for adults.',
-  },
-  advanced: {
-    child:
-      'I am a child and an advanced-level student of English. Use diverse but still clear language appropriate for kids. Choose topics and examples relevant and interesting for children.',
-    teenager:
-      'I am a teenager and an advanced-level student of English. Use diverse, sophisticated, but clear and modern English. Choose topics and examples relevant and interesting for teenagers.',
-    adult:
-      'I am an adult and an advanced-level student of English. Use diverse, sophisticated, but clear and modern English. Choose topics and examples relevant and interesting for adults.',
-  },
-};
+function buildTrainingPrompt(
+  level: TrainingLevel,
+  ageGroup: TrainingAgeGroup,
+  targetLangName: string,
+  instructionLangName: string,
+): string {
+  const levelDescriptions: Record<TrainingLevel, string> = {
+    beginner: 'a beginner-level',
+    intermediate: 'an intermediate-level',
+    advanced: 'an advanced-level',
+  };
+
+  const ageDescriptions: Record<TrainingAgeGroup, string> = {
+    child: 'a child',
+    teenager: 'a teenager',
+    adult: 'an adult',
+  };
+
+  const styleByAge: Record<TrainingAgeGroup, Record<TrainingLevel, string>> = {
+    child: {
+      beginner: `Use only simple, short sentences and clear language appropriate for kids. Choose topics and examples relevant and interesting for children.`,
+      intermediate: `Use clear language and vocabulary around intermediate level, appropriate for kids. Choose topics and examples relevant and interesting for children.`,
+      advanced: `Use diverse but still clear language appropriate for kids. Choose topics and examples relevant and interesting for children.`,
+    },
+    teenager: {
+      beginner: `Use simple, short sentences and clear language. Choose topics and examples relevant and interesting for teenagers.`,
+      intermediate: `Use modern, clear ${targetLangName} at intermediate level. Choose topics and examples relevant and interesting for teenagers.`,
+      advanced: `Use diverse, sophisticated, but clear and modern ${targetLangName}. Choose topics and examples relevant and interesting for teenagers.`,
+    },
+    adult: {
+      beginner: `Use simple, short sentences and clear language. Choose topics and examples relevant and interesting for adults.`,
+      intermediate: `Use modern, clear ${targetLangName} at intermediate level. Choose topics and examples relevant and interesting for adults.`,
+      advanced: `Use diverse, sophisticated, but clear and modern ${targetLangName}. Choose topics and examples relevant and interesting for adults.`,
+    },
+  };
+
+  return `I am ${ageDescriptions[ageGroup]} and ${levelDescriptions[level]} student of ${targetLangName}. Write all instructions, questions, and explanations in ${instructionLangName}. ${styleByAge[ageGroup][level]}`;
+}
 
 export function getTrainingPrompt(params: {
   level?: string | null;
   ageGroup?: string | null;
+  langContext: LangContext;
 }): string | undefined {
   const trainingLevel = mapLevelToTraining(params.level);
   const trainingAgeGroup = params.ageGroup as AgeGroupCode;
 
   if (!trainingLevel || !trainingAgeGroup) return undefined;
 
-  return trainingPrompts[trainingLevel]?.[trainingAgeGroup];
+  const targetLangName = getLanguageDisplayName(
+    params.langContext.targetLanguage,
+  );
+  const instructionLangName = resolveInstructionLanguageName(
+    params.langContext,
+  );
+
+  return buildTrainingPrompt(
+    trainingLevel,
+    trainingAgeGroup,
+    targetLangName,
+    instructionLangName,
+  );
 }
 
 export function getTranslatePrompt(
   words: string[],
-  meta?: { topic?: string; level?: string | null; ageGroup?: string | null },
+  meta?: {
+    topic?: string;
+    level?: string | null;
+    ageGroup?: string | null;
+    langContext?: LangContext;
+  },
 ): string {
+  const ctx: LangContext = meta?.langContext ?? {};
+  const targetLangName = getLanguageDisplayName(ctx.targetLanguage);
+  const nativeLangName = getLanguageDisplayName(ctx.nativeLanguage);
+
   const profile = getTrainingPrompt({
     level: meta?.level,
     ageGroup: meta?.ageGroup,
+    langContext: ctx,
   });
 
   const topicPart = meta?.topic
@@ -78,21 +142,21 @@ export function getTranslatePrompt(
 
   return `
 ${profile ?? ''}
-You are helping an English teacher prepare vocabulary for learners.
+You are helping a ${targetLangName} teacher prepare vocabulary for learners.
 
 For each phrase:
-1. Correct spelling if needed.
-2. Provide the most accurate and natural Russian translation (idiomatic if needed, not word-for-word).
-3. Provide 0–3 very simple English synonyms that a learner at this level could understand.
+1. Correct spelling if needed (the phrase is in ${targetLangName}).
+2. Provide the most accurate and natural ${nativeLangName} translation (idiomatic if needed, not word-for-word).
+3. Provide 0–3 very simple ${targetLangName} synonyms that a learner at this level could understand.
 
 ${topicPart}
 
 Return ONLY a JSON array, no other text. Each element MUST be:
 
 {
-  "term": "original English phrase",
-  "translation": "Russian translation",
-  "synonyms": ["simple synonym 1", "simple synonym 2", ...]
+  "term": "original ${targetLangName} phrase",
+  "translation": "${nativeLangName} translation",
+  "synonyms": ["simple ${targetLangName} synonym 1", "simple ${targetLangName} synonym 2", ...]
 }
 
 If there are no good simple synonyms, use an empty array [].
@@ -120,8 +184,8 @@ CRITICAL OUTPUT RULES:
 
 LEVEL ADAPTATION:
 - Beginner: very simple wording, very common vocabulary, no complicated grammar.
-- Intermediate: clear modern English, slightly richer vocabulary, still learner-friendly.
-- Advanced: natural modern English, more nuanced definitions, still clear.
+- Intermediate: clear modern language, slightly richer vocabulary, still learner-friendly.
+- Advanced: natural modern language, more nuanced definitions, still clear.
 
 OUTPUT QUALITY:
 - Avoid trick questions.
@@ -172,9 +236,6 @@ not because of a tiny grammar detail.
 CRITICAL OUTPUT RULES:
 - Use "multiple_choice" as questionType.
 - "question" MUST be a short instruction only. Do NOT include the sentences in "question".
-  Good examples:
-  - "Which sentence uses the phrase incorrectly?"
-  - "Find the sentence where the phrase is used incorrectly."
 - "answers" MUST contain EXACTLY 3 answers.
 - Each answer "text" MUST be ONE sentence only.
 - Do NOT number the sentences and do NOT prefix with A/B/C.
@@ -189,7 +250,7 @@ LEVEL ADAPTATION:
 EXPLANATION:
 - 1–2 short sentences:
   - briefly explain why the incorrect one is wrong
-  - briefly explain what the phrase actually means / how it’s used
+  - briefly explain what the phrase actually means / how it's used
 `.trim(),
 
   collocation_check: `
@@ -230,11 +291,21 @@ export function getAssignmentPrompt(params: {
   topic?: string;
   level?: string | null;
   ageGroup?: string | null;
+  langContext: LangContext;
 }): string {
-  const { trainingType, terms, questionsCount, topic, level, ageGroup } =
-    params;
+  const {
+    trainingType,
+    terms,
+    questionsCount,
+    topic,
+    level,
+    ageGroup,
+    langContext,
+  } = params;
 
-  const profile = getTrainingPrompt({ level, ageGroup });
+  const targetLangName = getLanguageDisplayName(langContext.targetLanguage);
+  const instructionLangName = resolveInstructionLanguageName(langContext);
+  const profile = getTrainingPrompt({ level, ageGroup, langContext });
   const typePrompt = trainingTypePrompts[trainingType];
 
   const topicPart = topic
@@ -246,13 +317,14 @@ export function getAssignmentPrompt(params: {
   return `
 ${profile ?? ''}
 
-You are an English teaching assistant.
+You are a ${targetLangName} teaching assistant.
+All instructions, questions, and explanations MUST be written in ${instructionLangName}.
 Create ${questionsCount} exercise items in STRICT JSON.
 
 ${topicPart}
 
 Exercise type key: ${trainingType}
-Target phrases:
+Target phrases (in ${targetLangName}):
 ${termsList}
 
 COUNT RULES:
@@ -264,18 +336,23 @@ COUNT RULES:
 TASK INSTRUCTIONS (VERY IMPORTANT):
 ${typePrompt}
 
+LANGUAGE RULES:
+- Target phrases are in ${targetLangName} — keep them as-is.
+- All questions, answer texts, and explanations MUST be in ${instructionLangName}.
+- Do NOT mix languages within a single field.
+
 OUTPUT FORMAT (STRICT JSON):
 Return ONLY a JSON array. No markdown. No comments. No extra text.
 
 Each element MUST be an object:
 
 {
-  "question": "string",
+  "question": "string (in ${instructionLangName})",
   "questionType": "multiple_choice" | "gap_fill" | "open_text",
   "answers": [
     { "text": "answer text", "isCorrect": true | false }
   ],
-  "explanation": "short, simple explanation"
+  "explanation": "short, simple explanation (in ${instructionLangName})"
 }
 
 GLOBAL RULES:

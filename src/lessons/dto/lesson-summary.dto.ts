@@ -7,6 +7,15 @@ export class LessonSummaryDto {
   @ApiProperty()
   title!: string;
 
+  @ApiProperty()
+  targetLanguage!: string;
+
+  @ApiProperty()
+  nativeLanguage!: string;
+
+  @ApiProperty()
+  instructionLanguage!: string;
+
   @ApiProperty({ required: false, nullable: true })
   topic?: string | null;
 
@@ -16,13 +25,9 @@ export class LessonSummaryDto {
   @ApiProperty({ required: false, nullable: true })
   ageCategory!: string | null;
 
-  @ApiProperty({
-    description: 'Количество слов (элементов vocab) в уроке',
-  })
+  @ApiProperty({ description: 'Количество слов (элементов vocab) в уроке' })
   vocabCount!: number;
 
-  @ApiProperty({
-    description: 'Количество заданий (assignments) в уроке',
-  })
+  @ApiProperty({ description: 'Количество заданий (assignments) в уроке' })
   assignmentsCount!: number;
 }

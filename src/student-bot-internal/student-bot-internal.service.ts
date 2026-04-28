@@ -22,6 +22,8 @@ export class StudentBotInternalService {
       items: lessons.map((l) => ({
         lessonId: l.id,
         title: l.title,
+        targetLanguage: (l as any).targetLanguage as string,
+        nativeLanguage: (l as any).nativeLanguage as string,
         level: l.level ?? null,
         topic: l.topic ?? null,
       })),

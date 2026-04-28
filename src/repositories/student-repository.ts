@@ -74,6 +74,7 @@ export class StudentsRepository {
     const lessons = await this.prisma.lesson.findMany({
       where: {
         archived: false,
+        createdById: teacherId,
         assignments: {
           some: {
             assignedAssignments: {

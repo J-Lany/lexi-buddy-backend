@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Language } from '@prisma/client';
 import { PrismaService } from 'common/modules/prisma/prisma.service';
 
 @Injectable()
@@ -134,6 +135,42 @@ export class UserRepository {
             },
           },
         },
+      },
+    });
+  }
+
+  async findTeacherProfile(userId: number) {
+    return this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        avatarUrl: true,
+        defaultLanguage: true,
+      },
+    });
+  }
+
+  async updateTeacherProfile(
+    userId: number,
+    data: {
+      firstName?: string;
+      lastName?: string;
+      defaultLanguage?: Language;
+    },
+  ) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        avatarUrl: true,
+        defaultLanguage: true,
       },
     });
   }

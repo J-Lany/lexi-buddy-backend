@@ -4,6 +4,7 @@ import { LessonsService } from './lessons.service';
 import { PrismaService } from 'common/modules/prisma/prisma.service';
 import { LessonRepository } from 'repositories/lesson.repository';
 import { AssignmentRepository } from 'repositories/assignment.repository';
+import { UserRepository } from 'repositories/user.repository';
 import { AiModule } from 'ai/ai.module';
 import { TelegramNotificationsModule } from 'common/modules/notifications/telegram-notifications.module';
 
@@ -15,6 +16,7 @@ import { TelegramNotificationsModule } from 'common/modules/notifications/telegr
     PrismaService,
     LessonRepository,
     AssignmentRepository,
+    UserRepository,
   ],
   exports: [LessonsService],
 })

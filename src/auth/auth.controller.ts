@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Patch,
   Post,
   Query,
   Res,
@@ -30,6 +31,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { JwtPayload } from './types/jwt-payload.type';
 import { getAuthCookieOptions } from 'auth/utils/auth-cookie.util';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -119,7 +121,7 @@ export class AuthController {
 
     res.cookie('refresh_token', newRefreshToken, {
       ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
     return { message: 'Tokens refreshed' };
@@ -143,14 +145,33 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @Post('logout')
-  @ApiOperation({ summary: 'Logout user using access token' })
-  @ApiBadRequestResponse({ description: 'User is not found' })
-  async logout(
+  @Get('me')
+  @ApiOperation({ summary: 'Get current teacher profile' })
+  @ApiOkResponse({ description: 'Teacher profile with defaultLanguage' })
+  async getProfile(@CurrentUser() user: JwtPayload) {
+    return this.authService.getProfile(user.sub);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Patch('me')
+  @ApiOperation({ summary: 'Update teacher profile (name, defaultLanguage)' })
+  @ApiOkResponse({ description: 'Updated teacher profile' })
+  async updateProfile(
     @CurrentUser() user: JwtPayload,
-    @Res({ passthrough: true }) res: Response,
+    @Body() dto: UpdateProfileDto,
   ) {
-    await this.authService.logout(user.sub);
+    return this.authService.updateProfile(user.sub, dto);
+  }
+
+  @Post('logout')
+  @ApiOperation({ summary: 'Logout user and clear auth cookies' })
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const refreshToken = req.cookies?.refresh_token;
+
+    if (refreshToken) {
+      await this.authService.revokeRefreshToken(refreshToken).catch(() => null);
+    }
 
     const cookieOptions = getAuthCookieOptions();
 

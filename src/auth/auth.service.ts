@@ -17,6 +17,7 @@ import { UserContactRepository } from 'repositories/user-contact.repository';
 import { LoginrDto } from './dto/login.dto/login.dto';
 import { RegisterTelegramDto } from './dto/register-telegram.dto/register-telegram.dto';
 import { TelegramAvatarService } from 'common/modules/telegram/telegram-avatar.service';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Injectable()
 export class AuthService {
@@ -186,9 +187,42 @@ export class AuthService {
     };
   }
 
-  async logout(userId: number) {
-    await this.userRepo.updateRefreshTokenHash(userId, null);
-    return { message: 'Logged out' };
+  async getProfile(userId: number) {
+    const profile = await this.userRepo.findTeacherProfile(userId);
+    if (!profile) throw new NotFoundException('User not found');
+    return profile;
+  }
+
+  async updateProfile(userId: number, dto: UpdateProfileDto) {
+    return this.userRepo.updateTeacherProfile(userId, {
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      defaultLanguage: dto.defaultLanguage,
+    });
+  }
+
+  async revokeRefreshToken(refreshToken: string): Promise<void> {
+    try {
+      const jwtPayload = await this.jwt.verifyAsync(refreshToken, {
+        secret: this.secret,
+      });
+
+      const user = await this.userRepo.findById(jwtPayload.sub);
+
+      if (!user || !user.refreshTokenHash) {
+        return;
+      }
+
+      const matches = await argon.verify(user.refreshTokenHash, refreshToken);
+
+      if (!matches) {
+        return;
+      }
+
+      await this.userRepo.updateRefreshTokenHash(user.id, null);
+    } catch {
+      return;
+    }
   }
 
   async refresh(refreshToken: string) {
