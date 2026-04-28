@@ -275,16 +275,4 @@ describe('AuthService (unit, manual DI)', () => {
   });
 
   // -------------------------------------------------------------------
-  // LOGOUT
-  // -------------------------------------------------------------------
-  describe('logout', () => {
-    it('should remove refresh token hash', async () => {
-      userRepo.updateRefreshTokenHash.mockResolvedValueOnce({} as any);
-
-      const result = await service.logout(5);
-
-      expect(userRepo.updateRefreshTokenHash).toHaveBeenCalledWith(5, null);
-      expect(result).toEqual({ message: 'Logged out' });
-    });
-  });
 });

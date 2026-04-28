@@ -52,6 +52,8 @@ export class StudentBotInternalRepository {
       select: {
         id: true,
         title: true,
+        targetLanguage: true,
+        nativeLanguage: true,
         level: true,
         topic: true,
         createdAt: true,
@@ -147,6 +149,9 @@ export class StudentBotInternalRepository {
           select: {
             id: true,
             title: true,
+            targetLanguage: true,
+            nativeLanguage: true,
+            instructionLanguage: true,
             level: true,
             ageCategory: true,
             topic: true,
@@ -184,6 +189,9 @@ export class StudentBotInternalRepository {
       lesson: {
         lessonId: a.lesson.id,
         title: a.lesson.title,
+        targetLanguage: a.lesson.targetLanguage,
+        nativeLanguage: a.lesson.nativeLanguage,
+        instructionLanguage: a.lesson.instructionLanguage,
         level: a.lesson.level ?? null,
         ageCategory: a.lesson.ageCategory ?? null,
         topic: a.lesson.topic ?? null,
