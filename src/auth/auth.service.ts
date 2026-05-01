@@ -190,7 +190,24 @@ export class AuthService {
   async getProfile(userId: number) {
     const profile = await this.userRepo.findTeacherProfile(userId);
     if (!profile) throw new NotFoundException('User not found');
-    return profile;
+
+    const adminEmails = (process.env.ADMIN_EMAILS ?? '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+
+    const email = profile.contacts[0]?.contactValue?.toLowerCase() ?? '';
+    const isAdmin = adminEmails.length > 0 && adminEmails.includes(email);
+
+    return {
+      id: profile.id,
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      username: profile.username,
+      avatarUrl: profile.avatarUrl,
+      defaultLanguage: profile.defaultLanguage,
+      isAdmin,
+    };
   }
 
   async updateProfile(userId: number, dto: UpdateProfileDto) {

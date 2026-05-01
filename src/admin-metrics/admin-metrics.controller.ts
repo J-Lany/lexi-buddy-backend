@@ -14,11 +14,12 @@ import {
 } from '@nestjs/swagger';
 import { AdminMetricsService } from './admin-metrics.service';
 import { JwtAuthGuard } from 'auth/guards/jwt-auth.guard';
+import { AdminGuard } from 'auth/guards/admin.guard';
 
 @ApiTags('admin')
 @ApiBearerAuth()
 @Controller('admin/metrics')
-@UseGuards(JwtAuthGuard) // TODO: добавить проверку роли admin/allowlist
+@UseGuards(JwtAuthGuard, AdminGuard)
 export class AdminMetricsController {
   constructor(private readonly service: AdminMetricsService) {}
 
