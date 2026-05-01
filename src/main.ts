@@ -4,12 +4,18 @@ import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import pinoHttp from 'pino-http';
+import helmet from 'helmet';
+import { json, urlencoded } from 'express';
 import { AppRequest } from 'common/types/http';
 import { ActivityService } from 'common/modules/activity/activity.service';
 import { LastVisitInterceptor } from 'auth/interceptors/last-visit.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  app.use(helmet());
+  app.use(json({ limit: '1mb' }));
+  app.use(urlencoded({ extended: true, limit: '1mb' }));
 
   const activity = app.get(ActivityService);
   app.useGlobalInterceptors(new LastVisitInterceptor(activity));

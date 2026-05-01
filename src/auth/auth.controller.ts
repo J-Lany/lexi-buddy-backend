@@ -27,6 +27,7 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto/register.dto';
 import { RegisterTelegramDto } from './dto/register-telegram.dto/register-telegram.dto';
 import { LoginrDto } from './dto/login.dto/login.dto';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { JwtPayload } from './types/jwt-payload.type';
@@ -38,6 +39,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
   @Post('register')
   @ApiOperation({ summary: 'Register user using email & password' })
   @ApiCreatedResponse({ description: 'Activation email sent' })
@@ -46,6 +48,7 @@ export class AuthController {
     return this.authService.register(dto);
   }
 
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
   @Post('register/telegram')
   @ApiOperation({ summary: 'Register user using Telegram ID and username' })
   @ApiCreatedResponse({
@@ -58,6 +61,7 @@ export class AuthController {
     return this.authService.registerTelegram(dto);
   }
 
+  @Throttle({ default: { ttl: 60_000, limit: 20 } })
   @Get('activate')
   @ApiOperation({ summary: 'Activate user using token' })
   @ApiQuery({ name: 'token', type: String, required: true })
@@ -69,6 +73,7 @@ export class AuthController {
     return this.authService.activate(token);
   }
 
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
   @Post('login')
   @ApiOperation({ summary: 'Login user using email & password' })
   @ApiOkResponse({ description: 'User info returned, tokens set in cookies' })
@@ -95,6 +100,7 @@ export class AuthController {
     return user;
   }
 
+  @Throttle({ default: { ttl: 60_000, limit: 20 } })
   @Post('refresh')
   @ApiOperation({
     summary: 'Refresh access & refresh tokens using refresh cookie',
@@ -127,6 +133,7 @@ export class AuthController {
     return { message: 'Tokens refreshed' };
   }
 
+  @Throttle({ default: { ttl: 60_000, limit: 20 } })
   @Get('by-telegram')
   @ApiOperation({ summary: 'Get user by Telegram ID (for bot)' })
   @ApiQuery({ name: 'telegramId', type: String, required: true })

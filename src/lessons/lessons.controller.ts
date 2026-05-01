@@ -19,6 +19,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { Throttle } from '@nestjs/throttler';
 import { LessonsService } from './lessons.service';
 import { JwtAuthGuard } from 'auth/guards/jwt-auth.guard';
 import { CurrentUser } from 'auth/decorators/current-user.decorator';
@@ -85,6 +86,7 @@ export class LessonsController {
     return this.lessonsService.getLessonForTeacher(lessonId, teacherId);
   }
 
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @Post('vocab/preview')
   @ApiOperation({
     summary:
@@ -116,6 +118,7 @@ export class LessonsController {
     return this.lessonsService.updateVocab(lessonId, dto, teacherId);
   }
 
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @Post('assignments/preview')
   @ApiOperation({
     summary:

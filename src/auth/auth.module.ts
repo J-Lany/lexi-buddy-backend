@@ -18,10 +18,12 @@ import { TelegramApiService } from 'common/modules/telegram/telegram-api.service
   imports: [
     MailModule,
     PassportModule,
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'dev-secret',
-      signOptions: {
-        expiresIn: '15m',
+    JwtModule.registerAsync({
+      useFactory: () => {
+        const secret = process.env.JWT_SECRET;
+        if (!secret)
+          throw new Error('JWT_SECRET environment variable is not set');
+        return { secret, signOptions: { expiresIn: '15m' } };
       },
     }),
   ],
