@@ -1,7 +1,7 @@
 {
   "name": "lexi-buddy-backend",
   "version": "0.0.1",
-  "description": "Backend API for Lexi Buddy (NestJS)",
+  "description": "Backenашd API for Lexi Buddy (NestJS)",
   "author": "",
   "private": true,
   "license": "UNLICENSED",

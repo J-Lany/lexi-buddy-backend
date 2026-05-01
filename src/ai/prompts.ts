@@ -203,7 +203,7 @@ For each target phrase:
 
 CRITICAL OUTPUT RULES:
 - Use "gap_fill" as questionType.
-- "question" MUST be the full sentence containing exactly ONE "____".
+- "question" MUST be the full sentence containing exactly ONE "____". The sentence MUST be written in the TARGET language (the language being learned), NOT in the instruction language.
 - "answers" MUST contain EXACTLY 1 answer object:
   - text = the missing target phrase (the correct fill)
   - isCorrect = true
@@ -338,7 +338,12 @@ ${typePrompt}
 
 LANGUAGE RULES:
 - Target phrases are in ${targetLangName} — keep them as-is.
-- All questions, answer texts, and explanations MUST be in ${instructionLangName}.
+${
+  trainingType === 'gap_filling'
+    ? `- "question" (the sentence with ____) MUST be in ${targetLangName} — the language the student is learning.
+- "explanation" MUST be in ${instructionLangName}.`
+    : `- All questions, answer texts, and explanations MUST be in ${instructionLangName}.`
+}
 - Do NOT mix languages within a single field.
 
 OUTPUT FORMAT (STRICT JSON):
@@ -347,7 +352,7 @@ Return ONLY a JSON array. No markdown. No comments. No extra text.
 Each element MUST be an object:
 
 {
-  "question": "string (in ${instructionLangName})",
+  "question": "string (in ${trainingType === 'gap_filling' ? targetLangName : instructionLangName})",
   "questionType": "multiple_choice" | "gap_fill" | "open_text",
   "answers": [
     { "text": "answer text", "isCorrect": true | false }
