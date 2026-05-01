@@ -149,6 +149,10 @@ export class UserRepository {
         username: true,
         avatarUrl: true,
         defaultLanguage: true,
+        contacts: {
+          where: { contactType: { name: 'email' } },
+          select: { contactValue: true },
+        },
       },
     });
   }
