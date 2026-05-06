@@ -33,6 +33,7 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import { JwtPayload } from './types/jwt-payload.type';
 import { getAuthCookieOptions } from 'auth/utils/auth-cookie.util';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { RequestPasswordChangeDto } from './dto/request-password-change.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -169,6 +170,35 @@ export class AuthController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.authService.updateProfile(user.sub, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
+  @Post('request-password-change')
+  @ApiOperation({
+    summary: 'Request password change — sends confirmation email',
+  })
+  @ApiOkResponse({ description: 'Confirmation email sent' })
+  @ApiBadRequestResponse({
+    description: 'Passwords do not match or no email on account',
+  })
+  requestPasswordChange(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: RequestPasswordChangeDto,
+  ) {
+    return this.authService.requestPasswordChange(user.sub, dto);
+  }
+
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  @Post('confirm-password-change')
+  @ApiOperation({ summary: 'Confirm password change via token from email' })
+  @ApiQuery({ name: 'token', type: String, required: true })
+  @ApiOkResponse({ description: 'Password changed successfully' })
+  @ApiBadRequestResponse({ description: 'Invalid or expired token' })
+  confirmPasswordChange(@Query('token') token: string) {
+    if (!token) throw new BadRequestException('Missing token');
+    return this.authService.confirmPasswordChange(token);
   }
 
   @Post('logout')

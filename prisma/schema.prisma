@@ -110,6 +110,7 @@ model User {
   createdLessons             Lesson[]                    @relation("LessonCreator")
   notifications              Notification[]
   studentAssignedAssignments StudentAssignedAssignment[]
+  passwordChangeRequest      PasswordChangeRequest?
 }
 
 model Role {
@@ -372,6 +373,16 @@ model Result {
 
   @@index([attemptId])
   @@index([questionId])
+}
+
+model PasswordChangeRequest {
+  id           String   @id @default(cuid())
+  userId       Int      @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  passwordHash String
+  token        String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
 }
 
 // ---------- ADDITIONALS ----------

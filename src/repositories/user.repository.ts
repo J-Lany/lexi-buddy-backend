@@ -105,6 +105,13 @@ export class UserRepository {
     });
   }
 
+  async updatePasswordHash(userId: number, passwordHash: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+  }
+
   async findById(id: number) {
     return this.prisma.user.findUnique({
       where: { id },

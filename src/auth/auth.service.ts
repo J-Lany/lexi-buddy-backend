@@ -14,10 +14,12 @@ import { UserRepository } from 'repositories/user.repository';
 import { ContactTypeRepository } from 'repositories/contact-type.repository';
 import { RoleRepository } from 'repositories/role.repository';
 import { UserContactRepository } from 'repositories/user-contact.repository';
+import { PasswordChangeRequestRepository } from 'repositories/password-change-request.repository';
 import { LoginrDto } from './dto/login.dto/login.dto';
 import { RegisterTelegramDto } from './dto/register-telegram.dto/register-telegram.dto';
 import { TelegramAvatarService } from 'common/modules/telegram/telegram-avatar.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { RequestPasswordChangeDto } from './dto/request-password-change.dto';
 
 @Injectable()
 export class AuthService {
@@ -29,6 +31,7 @@ export class AuthService {
     private contactTypeRepo: ContactTypeRepository,
     private userContactRepo: UserContactRepository,
     private roleRepo: RoleRepository,
+    private passwordChangeRepo: PasswordChangeRequestRepository,
     private telegramAvatarService?: TelegramAvatarService,
   ) {}
 
@@ -240,6 +243,53 @@ export class AuthService {
     } catch {
       return;
     }
+  }
+
+  async requestPasswordChange(userId: number, dto: RequestPasswordChangeDto) {
+    if (dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Passwords do not match');
+    }
+
+    const user = await this.userRepo.findByIdWithContacts(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    const email = user.contacts.find(
+      (c) => c.contactType.name === 'email',
+    )?.contactValue;
+    if (!email)
+      throw new BadRequestException('No email associated with this account');
+
+    const passwordHash = await argon.hash(dto.password);
+    const token = randomUUID();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+    await this.passwordChangeRepo.upsert({
+      userId,
+      passwordHash,
+      token,
+      expiresAt,
+    });
+    await this.mail.sendPasswordChangeMail(email, token);
+
+    return { message: 'Confirmation email sent' };
+  }
+
+  async confirmPasswordChange(token: string) {
+    const request = await this.passwordChangeRepo.findByToken(token);
+
+    if (!request) throw new BadRequestException('Invalid or expired token');
+    if (request.expiresAt < new Date()) {
+      await this.passwordChangeRepo.deleteByUserId(request.userId);
+      throw new BadRequestException('Token has expired');
+    }
+
+    await this.userRepo.updatePasswordHash(
+      request.userId,
+      request.passwordHash,
+    );
+    await this.passwordChangeRepo.deleteByUserId(request.userId);
+
+    return { message: 'Password changed successfully' };
   }
 
   async refresh(refreshToken: string) {

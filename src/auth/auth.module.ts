@@ -10,6 +10,7 @@ import { UserRepository } from 'repositories/user.repository';
 import { ContactTypeRepository } from 'repositories/contact-type.repository';
 import { UserContactRepository } from 'repositories/user-contact.repository';
 import { RoleRepository } from 'repositories/role.repository';
+import { PasswordChangeRequestRepository } from 'repositories/password-change-request.repository';
 import { StorageService } from 'common/modules/storage/storage.service';
 import { TelegramAvatarService } from 'common/modules/telegram/telegram-avatar.service';
 import { TelegramApiService } from 'common/modules/telegram/telegram-api.service';
@@ -37,6 +38,7 @@ import { TelegramApiService } from 'common/modules/telegram/telegram-api.service
     ContactTypeRepository,
     UserContactRepository,
     RoleRepository,
+    PasswordChangeRequestRepository,
     JwtStrategy,
     JwtAuthGuard,
   ],

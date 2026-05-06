@@ -68,6 +68,7 @@ describe('AuthService (unit, manual DI)', () => {
       contactTypeRepo,
       userContactRepo,
       roleRepo,
+      {} as any,
       undefined,
     );
   });
