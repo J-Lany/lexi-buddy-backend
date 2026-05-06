@@ -16,6 +16,7 @@ describe('MailService', () => {
     RESEND_API_KEY: 're_test_key',
     MAIL_FROM: 'Lexi Buddy <no-reply@auth.lexi-buddy.com>',
     ACTIVATION_URL: 'https://api.lexi-buddy.com/auth/activate',
+    PASSWORD_CHANGE_URL: 'https://api.lexi-buddy.com/auth/change-password',
   };
 
   beforeEach(async () => {
