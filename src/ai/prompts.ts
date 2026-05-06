@@ -339,8 +339,9 @@ ${typePrompt}
 LANGUAGE RULES:
 - Target phrases are in ${targetLangName} — keep them as-is.
 ${
-  trainingType === 'gap_filling'
-    ? `- "question" (the sentence with ____) MUST be in ${targetLangName} — the language the student is learning.
+  trainingType === 'gap_filling' || trainingType === 'collocation_check'
+    ? `- "question" (the sentence(s) with ____) MUST be in ${targetLangName} — the language the student is learning.
+- "answers" text MUST be in ${targetLangName} (the target phrase itself).
 - "explanation" MUST be in ${instructionLangName}.`
     : `- All questions, answer texts, and explanations MUST be in ${instructionLangName}.`
 }
@@ -352,7 +353,7 @@ Return ONLY a JSON array. No markdown. No comments. No extra text.
 Each element MUST be an object:
 
 {
-  "question": "string (in ${trainingType === 'gap_filling' ? targetLangName : instructionLangName})",
+  "question": "string (in ${trainingType === 'gap_filling' || trainingType === 'collocation_check' ? targetLangName : instructionLangName})",
   "questionType": "multiple_choice" | "gap_fill" | "open_text",
   "answers": [
     { "text": "answer text", "isCorrect": true | false }
