@@ -93,6 +93,14 @@ export class AdminMetricsRepository {
     return { dau, wau, mau };
   }
 
+  async countTotalRegisteredUsers() {
+    const [students, teachers] = await Promise.all([
+      this.prisma.user.count({ where: { role: { name: 'student' } } }),
+      this.prisma.user.count({ where: { role: { name: 'teacher' } } }),
+    ]);
+    return { students, teachers };
+  }
+
   async getTotals(input: {
     from: Date;
     to: Date;

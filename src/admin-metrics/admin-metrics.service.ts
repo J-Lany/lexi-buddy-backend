@@ -93,6 +93,7 @@ export class AdminMetricsService {
       studentsCompleted,
       totalsRaw,
       byAssignmentType,
+      totalRegistered,
     ] = await Promise.all([
       this.repo.countTeachersActivity({ dauFrom, wauFrom, mauFrom, to }),
       this.repo.countStudentsActivityStarted({ dauFrom, wauFrom, mauFrom, to }),
@@ -110,6 +111,7 @@ export class AdminMetricsService {
         completedStatuses: COMPLETED_STATUSES,
         timezone: TZ,
       }),
+      this.repo.countTotalRegisteredUsers(),
     ]);
 
     const attemptCompletionRate =
@@ -130,6 +132,8 @@ export class AdminMetricsService {
         completed: studentsCompleted,
       },
       totals: {
+        totalRegisteredStudents: totalRegistered.students,
+        totalRegisteredTeachers: totalRegistered.teachers,
         ...totalsRaw,
         attemptCompletionRate,
       },

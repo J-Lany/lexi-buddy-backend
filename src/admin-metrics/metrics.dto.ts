@@ -7,6 +7,8 @@ export type OverviewRangeDto = {
 };
 
 export type OverviewTotalsDto = {
+  totalRegisteredStudents: number;
+  totalRegisteredTeachers: number;
   lessonsCreated: number;
   assignmentsAssigned: number;
   assignmentAttemptsStarted: number;
