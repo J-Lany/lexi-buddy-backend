@@ -220,8 +220,10 @@ model Lesson {
   instructionLanguage InstructionLanguage @default(native)
   level               Level?
   ageCategory         AgeGroup?
-  topic       String?
-  description String?
+  topic                  String?
+  description            String?
+  additionalInstructions String?
+  materialLinks          String[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   archived    Boolean   @default(false)

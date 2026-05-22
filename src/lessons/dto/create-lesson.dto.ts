@@ -1,9 +1,12 @@
 import { AgeGroup, InstructionLanguage, Language, Level } from '@prisma/client';
 import {
+  ArrayMaxSize,
   IsArray,
   IsEnum,
   IsOptional,
   IsString,
+  IsUrl,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -65,6 +68,20 @@ export class CreateLessonDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @ApiProperty({ required: false, maxLength: 3000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(3000)
+  additionalInstructions?: string;
+
+  @ApiProperty({ required: false, type: [String], maxItems: 5 })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsUrl({ protocols: ['https'], require_protocol: true }, { each: true })
+  @MaxLength(2048, { each: true })
+  materialLinks?: string[];
 
   @ApiProperty()
   @IsOptional()

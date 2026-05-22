@@ -73,6 +73,8 @@ export class LessonsService {
         dto.instructionLanguage ?? InstructionLanguage.native,
       topic: dto.topic,
       description: dto.description,
+      additionalInstructions: dto.additionalInstructions,
+      materialLinks: dto.materialLinks ?? [],
       level: dto.level,
       ageCategory: dto.ageCategory,
       createdBy: { connect: { id: teacherId } },
