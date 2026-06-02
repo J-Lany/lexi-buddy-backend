@@ -23,6 +23,8 @@ export type LessonDetailsDto = {
   topic: string | null;
   level: string | null;
   ageCategory: string | null;
+  additionalInstructions: string | null;
+  materialLinks: string[];
 
   vocab: {
     id: number;

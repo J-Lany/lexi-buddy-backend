@@ -139,6 +139,16 @@ export class StudentBotInternalRepository {
     });
   }
 
+  async findLessonMaterials(lessonId: number) {
+    return this.prisma.lesson.findUnique({
+      where: { id: lessonId },
+      select: {
+        additionalInstructions: true,
+        materialLinks: true,
+      },
+    });
+  }
+
   async getAssignmentPayload(assignmentId: number) {
     const a = await this.prisma.assignment.findUnique({
       where: { id: assignmentId },

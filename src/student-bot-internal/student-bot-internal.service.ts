@@ -43,12 +43,14 @@ export class StudentBotInternalService {
     const studentId = await this.repo.findStudentIdByTelegramId(telegramId);
     if (!studentId) throw new NotFoundException('Student not found');
 
-    const items = await this.repo.findAssignmentsForStudentInLesson(
-      studentId,
-      lessonId,
-    );
+    const [items, materials] = await Promise.all([
+      this.repo.findAssignmentsForStudentInLesson(studentId, lessonId),
+      this.repo.findLessonMaterials(lessonId),
+    ]);
 
     return {
+      additionalInstructions: materials?.additionalInstructions ?? null,
+      materialLinks: materials?.materialLinks ?? [],
       items: items.map((a) => ({
         assignmentId: a.assignmentId,
         type: a.typeName,

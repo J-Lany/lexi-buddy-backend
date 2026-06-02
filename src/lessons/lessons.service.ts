@@ -254,6 +254,8 @@ export class LessonsService {
       topic: l.topic,
       level: l.level,
       ageCategory: l.ageCategory,
+      additionalInstructions: l.additionalInstructions ?? null,
+      materialLinks: l.materialLinks ?? [],
       vocab,
       assignments,
       groups,
