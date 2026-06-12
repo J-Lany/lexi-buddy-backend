@@ -111,6 +111,9 @@ model User {
   notifications              Notification[]
   studentAssignedAssignments StudentAssignedAssignment[]
   passwordChangeRequest      PasswordChangeRequest?
+
+  @@index([roleId])
+  @@index([lastVisit])
 }
 
 model Role {
@@ -233,6 +236,8 @@ model Lesson {
   vocab        LessonVocab[]
   assignments  Assignment[]
   groupLessons GroupLesson[]
+
+  @@index([createdById])
 }
 
 model GroupLesson {

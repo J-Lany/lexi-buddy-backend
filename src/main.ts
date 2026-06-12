@@ -9,6 +9,7 @@ import { json, urlencoded } from 'express';
 import { AppRequest } from 'common/types/http';
 import { ActivityService } from 'common/modules/activity/activity.service';
 import { LastVisitInterceptor } from 'auth/interceptors/last-visit.interceptor';
+import { AllExceptionsFilter } from 'common/filters/all-exceptions.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -24,7 +25,7 @@ async function bootstrap() {
   app.use(
     pinoHttp<AppRequest, Response>({
       customProps: (req) => ({
-        env: process.env.APP_ENV ?? 'loval',
+        env: process.env.APP_ENV ?? 'local',
         service: process.env.SERVICE_NAME ?? 'backend',
         request_id: req.requestId ?? null,
         user_id: req.user?.id ?? null,
@@ -40,9 +41,11 @@ async function bootstrap() {
     }),
   );
 
-  const origins = process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',')
-    : [];
+  const corsOriginsEnv = process.env.CORS_ORIGINS;
+  if (!corsOriginsEnv) {
+    throw new Error('CORS_ORIGINS env variable is required');
+  }
+  const origins = corsOriginsEnv.split(',').map((o) => o.trim());
 
   app.enableCors({
     origin: origins,
@@ -57,6 +60,8 @@ async function bootstrap() {
     credentials: true,
   });
 
+  app.useGlobalFilters(new AllExceptionsFilter());
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -65,23 +70,25 @@ async function bootstrap() {
     }),
   );
 
-  const config = new DocumentBuilder()
-    .setTitle('Lexi Buddy API')
-    .setDescription('API documentation for Lexi Buddy backend')
-    .addBearerAuth(
-      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
-      'jwt',
-    )
-    .addApiKey(
-      { type: 'apiKey', name: 'x-internal-token', in: 'header' },
-      'internal-token',
-    )
-    .setVersion('1.0')
-    .addTag('auth')
-    .build();
+  if (process.env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('Lexi Buddy API')
+      .setDescription('API documentation for Lexi Buddy backend')
+      .addBearerAuth(
+        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        'jwt',
+      )
+      .addApiKey(
+        { type: 'apiKey', name: 'x-internal-token', in: 'header' },
+        'internal-token',
+      )
+      .setVersion('1.0')
+      .addTag('auth')
+      .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('swagger', app, document);
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('swagger', app, document);
+  }
 
   await app.listen(process.env.PORT ?? 3000);
 }

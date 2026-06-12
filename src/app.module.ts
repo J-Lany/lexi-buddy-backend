@@ -2,8 +2,6 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ConfigModule } from '@nestjs/config';
-import { AppController } from 'app.controller';
-import { AppService } from 'app.service';
 import { AuthModule } from 'auth/auth.module';
 import { MailModule } from 'common/modules/mail/mail.module';
 import { PrismaModule } from 'common/modules/prisma/prisma.module';
@@ -34,8 +32,8 @@ import { AdminMetricsModule } from 'admin-metrics/admin-metrics.module';
     }),
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 60 }]),
   ],
-  controllers: [AppController, HealthController],
-  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+  controllers: [HealthController],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

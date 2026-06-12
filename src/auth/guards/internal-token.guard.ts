@@ -4,6 +4,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { timingSafeEqual } from 'crypto';
 
 @Injectable()
 export class InternalTokenGuard implements CanActivate {
@@ -18,7 +19,16 @@ export class InternalTokenGuard implements CanActivate {
       );
     }
 
-    if (!token || token !== expected) {
+    if (!token || token.length !== expected.length) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+
+    const tokensMatch = timingSafeEqual(
+      Buffer.from(token),
+      Buffer.from(expected),
+    );
+
+    if (!tokensMatch) {
       throw new UnauthorizedException('Unauthorized');
     }
 

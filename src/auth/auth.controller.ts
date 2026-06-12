@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
   UseGuards,
   Req,
+  ParseIntPipe,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -29,6 +30,7 @@ import { RegisterTelegramDto } from './dto/register-telegram.dto/register-telegr
 import { LoginrDto } from './dto/login.dto/login.dto';
 import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { InternalTokenGuard } from './guards/internal-token.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { JwtPayload } from './types/jwt-payload.type';
 import { getAuthCookieOptions } from 'auth/utils/auth-cookie.util';
@@ -134,21 +136,14 @@ export class AuthController {
     return { message: 'Tokens refreshed' };
   }
 
-  @Throttle({ default: { ttl: 60_000, limit: 20 } })
+  @UseGuards(InternalTokenGuard)
   @Get('by-telegram')
   @ApiOperation({ summary: 'Get user by Telegram ID (for bot)' })
-  @ApiQuery({ name: 'telegramId', type: String, required: true })
+  @ApiQuery({ name: 'telegramId', type: Number, required: true })
   @ApiOkResponse({ description: 'User found' })
   @ApiNotFoundResponse({ description: 'User not found' })
-  @ApiBadRequestResponse({ description: 'Invalid telegramId' })
-  async getByTelegram(@Query('telegramId') telegramId: string) {
-    if (!telegramId) throw new BadRequestException('Missing telegramId');
-
-    const id = Number(telegramId);
-    if (!Number.isFinite(id))
-      throw new BadRequestException('Invalid telegramId');
-
-    return this.authService.getByTelegramId(id);
+  async getByTelegram(@Query('telegramId', ParseIntPipe) telegramId: number) {
+    return this.authService.getByTelegramId(telegramId);
   }
 
   @UseGuards(JwtAuthGuard)

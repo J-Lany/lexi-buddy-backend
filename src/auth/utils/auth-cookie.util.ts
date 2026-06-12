@@ -6,7 +6,7 @@ export function getAuthCookieOptions(): CookieOptions {
 
   return {
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite: 'strict',
     secure: cookieSecure,
     path: '/',
     ...(cookieDomain ? { domain: cookieDomain } : {}),
