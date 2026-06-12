@@ -137,8 +137,9 @@ async function seedTestData() {
   }
 
   // Teacher
-  const teacherEmail = 'anna.ivanovna@example.com';
-  const teacherPassword = 'Password123';
+  const teacherEmail =
+    process.env.SEED_TEACHER_EMAIL ?? 'anna.ivanovna@example.com';
+  const teacherPassword = process.env.SEED_TEACHER_PASSWORD ?? 'Password123';
   let teacher = await findUserByEmail(teacherEmail, emailType.id);
 
   if (!teacher) {
