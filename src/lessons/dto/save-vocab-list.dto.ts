@@ -1,10 +1,13 @@
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
   IsInt,
   IsOptional,
   IsString,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class SaveVocabItemDto {
@@ -29,8 +32,11 @@ export class SaveVocabItemDto {
 }
 
 export class SaveVocabListDto {
-  @ApiProperty()
+  @ApiProperty({ maxItems: 50 })
   @IsArray()
   @ArrayNotEmpty()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => SaveVocabItemDto)
   items!: SaveVocabItemDto[];
 }

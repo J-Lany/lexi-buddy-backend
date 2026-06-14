@@ -6,6 +6,7 @@ import { UserRepository } from 'repositories/user.repository';
 import { RoleRepository } from 'repositories/role.repository';
 import { ContactTypeRepository } from 'repositories/contact-type.repository';
 import { UserContactRepository } from 'repositories/user-contact.repository';
+import { PasswordChangeRequestRepository } from 'repositories/password-change-request.repository';
 import { JwtService } from '@nestjs/jwt';
 import * as argon from 'argon2';
 
@@ -23,11 +24,13 @@ describe('AuthService (unit, manual DI)', () => {
   let roleRepo: jest.Mocked<RoleRepository>;
   let contactTypeRepo: jest.Mocked<ContactTypeRepository>;
   let userContactRepo: jest.Mocked<UserContactRepository>;
+  let passwordChangeRepo: jest.Mocked<PasswordChangeRequestRepository>;
 
   beforeEach(() => {
     process.env.JWT_SECRET = 'test-secret';
     mailService = {
       sendActivationMail: jest.fn(),
+      sendPasswordChangeMail: jest.fn(),
     } as any;
 
     jwtService = {
@@ -44,7 +47,15 @@ describe('AuthService (unit, manual DI)', () => {
       findByEmail: jest.fn(),
       updateRefreshTokenHash: jest.fn(),
       findById: jest.fn(),
+      findByIdWithContacts: jest.fn(),
       findByTelegramId: jest.fn(),
+      updatePasswordHash: jest.fn(),
+    } as any;
+
+    passwordChangeRepo = {
+      upsert: jest.fn(),
+      findByToken: jest.fn(),
+      deleteByUserId: jest.fn(),
     } as any;
 
     roleRepo = {
@@ -68,7 +79,7 @@ describe('AuthService (unit, manual DI)', () => {
       contactTypeRepo,
       userContactRepo,
       roleRepo,
-      {} as any,
+      passwordChangeRepo,
       undefined,
     );
   });
@@ -272,6 +283,169 @@ describe('AuthService (unit, manual DI)', () => {
           secret: expect.any(String),
         }),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // REFRESH
+  // -------------------------------------------------------------------
+  describe('refresh', () => {
+    it('should throw UnauthorizedException if token verification fails', async () => {
+      jwtService.verifyAsync.mockRejectedValueOnce(new Error('jwt expired'));
+
+      await expect(service.refresh('bad-token')).rejects.toThrow(
+        'Invalid or expired refresh token',
+      );
+    });
+
+    it('should throw UnauthorizedException if user not found', async () => {
+      jwtService.verifyAsync.mockResolvedValueOnce({ sub: 99 });
+      userRepo.findById.mockResolvedValueOnce(null as any);
+
+      await expect(service.refresh('token')).rejects.toThrow(
+        'Invalid or expired refresh token',
+      );
+    });
+
+    it('should throw UnauthorizedException if refresh hash does not match', async () => {
+      jwtService.verifyAsync.mockResolvedValueOnce({ sub: 1 });
+      userRepo.findById.mockResolvedValueOnce({
+        id: 1,
+        roleId: 2,
+        refreshTokenHash: 'old-hash',
+      } as any);
+      (argon.verify as jest.Mock).mockResolvedValueOnce(false);
+
+      await expect(service.refresh('token')).rejects.toThrow(
+        'Invalid or expired refresh token',
+      );
+    });
+
+    it('should return new tokens and rotate refresh hash on success', async () => {
+      jwtService.verifyAsync.mockResolvedValueOnce({ sub: 1, roleId: 2 });
+      userRepo.findById.mockResolvedValueOnce({
+        id: 1,
+        roleId: 2,
+        refreshTokenHash: 'valid-hash',
+      } as any);
+      (argon.verify as jest.Mock).mockResolvedValueOnce(true);
+      (jwtService.signAsync as jest.Mock)
+        .mockResolvedValueOnce('new-access')
+        .mockResolvedValueOnce('new-refresh');
+      (argon.hash as jest.Mock).mockResolvedValueOnce('new-refresh-hash');
+
+      const result = await service.refresh('old-refresh-token');
+
+      expect(result).toEqual({
+        accessToken: 'new-access',
+        refreshToken: 'new-refresh',
+      });
+      expect(userRepo.updateRefreshTokenHash).toHaveBeenCalledWith(
+        1,
+        'new-refresh-hash',
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // REQUEST PASSWORD CHANGE
+  // -------------------------------------------------------------------
+  describe('requestPasswordChange', () => {
+    const dto = { password: 'NewPass1!', confirmPassword: 'NewPass1!' };
+
+    it('should throw if passwords do not match', async () => {
+      await expect(
+        service.requestPasswordChange(1, {
+          password: 'aaa',
+          confirmPassword: 'bbb',
+        } as any),
+      ).rejects.toThrow('Passwords do not match');
+
+      expect(userRepo.findByIdWithContacts).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException if user not found', async () => {
+      userRepo.findByIdWithContacts.mockResolvedValueOnce(null as any);
+
+      await expect(
+        service.requestPasswordChange(1, dto as any),
+      ).rejects.toThrow('User not found');
+    });
+
+    it('should throw if user has no email contact', async () => {
+      userRepo.findByIdWithContacts.mockResolvedValueOnce({
+        contacts: [],
+      } as any);
+
+      await expect(
+        service.requestPasswordChange(1, dto as any),
+      ).rejects.toThrow('No email associated with this account');
+    });
+
+    it('should hash password, upsert request and send email on success', async () => {
+      userRepo.findByIdWithContacts.mockResolvedValueOnce({
+        contacts: [
+          {
+            contactType: { name: 'email' },
+            contactValue: 'user@example.com',
+          },
+        ],
+      } as any);
+      (argon.hash as jest.Mock).mockResolvedValueOnce('pw-hash');
+      passwordChangeRepo.upsert.mockResolvedValueOnce(undefined as any);
+
+      const result = await service.requestPasswordChange(1, dto as any);
+
+      expect(result).toEqual({ message: 'Confirmation email sent' });
+      expect(argon.hash).toHaveBeenCalledWith(dto.password);
+      expect(passwordChangeRepo.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 1, passwordHash: 'pw-hash' }),
+      );
+      expect(mailService.sendPasswordChangeMail).toHaveBeenCalledWith(
+        'user@example.com',
+        expect.any(String),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // CONFIRM PASSWORD CHANGE
+  // -------------------------------------------------------------------
+  describe('confirmPasswordChange', () => {
+    it('should throw if token not found', async () => {
+      passwordChangeRepo.findByToken.mockResolvedValueOnce(null as any);
+
+      await expect(service.confirmPasswordChange('bad-token')).rejects.toThrow(
+        'Invalid or expired token',
+      );
+    });
+
+    it('should throw and delete request if token is expired', async () => {
+      passwordChangeRepo.findByToken.mockResolvedValueOnce({
+        userId: 1,
+        passwordHash: 'hash',
+        expiresAt: new Date(Date.now() - 1000),
+      } as any);
+
+      await expect(
+        service.confirmPasswordChange('expired-token'),
+      ).rejects.toThrow('Token has expired');
+      expect(passwordChangeRepo.deleteByUserId).toHaveBeenCalledWith(1);
+      expect(userRepo.updatePasswordHash).not.toHaveBeenCalled();
+    });
+
+    it('should update password and delete request on success', async () => {
+      passwordChangeRepo.findByToken.mockResolvedValueOnce({
+        userId: 1,
+        passwordHash: 'new-hash',
+        expiresAt: new Date(Date.now() + 60_000),
+      } as any);
+
+      const result = await service.confirmPasswordChange('valid-token');
+
+      expect(result).toEqual({ message: 'Password changed successfully' });
+      expect(userRepo.updatePasswordHash).toHaveBeenCalledWith(1, 'new-hash');
+      expect(passwordChangeRepo.deleteByUserId).toHaveBeenCalledWith(1);
     });
   });
 

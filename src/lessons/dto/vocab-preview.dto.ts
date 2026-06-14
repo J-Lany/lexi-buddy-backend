@@ -1,18 +1,22 @@
 import { AgeGroup, InstructionLanguage, Language, Level } from '@prisma/client';
 import { ApiProperty } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
   IsEnum,
   IsOptional,
   IsString,
+  MaxLength,
 } from 'class-validator';
 
 export class VocabPreviewDto {
-  @ApiProperty()
+  @ApiProperty({ maxItems: 50 })
   @IsArray()
   @ArrayNotEmpty()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(100, { each: true })
   terms!: string[];
 
   @ApiProperty()

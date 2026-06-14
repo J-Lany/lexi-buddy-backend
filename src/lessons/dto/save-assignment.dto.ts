@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
   IsBoolean,
@@ -6,7 +7,9 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { FrontAssignmentType } from './assignment-preview.dto';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -39,9 +42,12 @@ export class SaveAssignmentQuestionDto {
   @IsString()
   questionType!: 'multiple_choice' | 'gap_fill' | 'open_text';
 
-  @ApiProperty()
+  @ApiProperty({ maxItems: 6 })
   @IsArray()
   @ArrayNotEmpty()
+  @ArrayMaxSize(6)
+  @ValidateNested({ each: true })
+  @Type(() => SaveAssignmentAnswerDto)
   answers!: SaveAssignmentAnswerDto[];
 
   @ApiProperty()
@@ -55,8 +61,11 @@ export class SaveAssignmentDto {
   @IsEnum(FrontAssignmentType)
   type!: FrontAssignmentType;
 
-  @ApiProperty()
+  @ApiProperty({ maxItems: 50 })
   @IsArray()
   @ArrayNotEmpty()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => SaveAssignmentQuestionDto)
   questions!: SaveAssignmentQuestionDto[];
 }

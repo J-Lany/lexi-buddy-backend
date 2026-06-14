@@ -68,7 +68,11 @@ export class AiService {
 
       return typeof content === 'string' ? content : String(content);
     } catch (e) {
-      this.logger.error('AI request failed', e);
+      const status = (e as any)?.response?.status;
+      const message = e instanceof Error ? e.message : String(e);
+      this.logger.error(
+        `AI request failed: ${message}${status ? ` (HTTP ${status})` : ''}`,
+      );
       throw e;
     }
   }

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -23,7 +24,8 @@ import { RequestPasswordChangeDto } from './dto/request-password-change.dto';
 
 @Injectable()
 export class AuthService {
-  private readonly secret = process.env.JWT_SECRET;
+  private readonly logger = new Logger(AuthService.name);
+  private readonly secret: string;
   constructor(
     private mail: MailService,
     private jwt: JwtService,
@@ -33,7 +35,12 @@ export class AuthService {
     private roleRepo: RoleRepository,
     private passwordChangeRepo: PasswordChangeRequestRepository,
     private telegramAvatarService?: TelegramAvatarService,
-  ) {}
+  ) {
+    const secret = process.env.JWT_SECRET;
+    if (!secret)
+      throw new Error('JWT_SECRET must be set in environment variables');
+    this.secret = secret;
+  }
 
   async register(dto: RegisterDto) {
     const exist = await this.userContactRepo.findByEmail(dto.email);
@@ -88,11 +95,9 @@ export class AuthService {
           )
         : null;
     } catch (e) {
-      console.warn('Telegram avatar fetch failed', {
-        telegramId: dto.telegramId,
-        message: e instanceof Error ? e.message : String(e),
-        stack: e instanceof Error ? e.stack : null,
-      });
+      this.logger.warn(
+        `Telegram avatar fetch failed for telegramId=${dto.telegramId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
       avatarUrl = null;
     }
 

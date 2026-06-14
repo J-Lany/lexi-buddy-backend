@@ -190,6 +190,7 @@ model GroupMember {
   role  Role  @relation(fields: [roleId], references: [id])
 
   @@unique([groupId, userId]) // один пользователь в группе не дублируется
+  @@index([userId])
 }
 
 model GroupInvite {
@@ -288,6 +289,8 @@ model Assignment {
 
   questions           AssignmentQuestion[]
   assignedAssignments StudentAssignedAssignment[]
+
+  @@index([lessonId])
 }
 
 model AssignmentQuestionType {
