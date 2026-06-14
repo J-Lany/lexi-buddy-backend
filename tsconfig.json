@@ -25,6 +25,6 @@
     "noUnusedParameters": false,
     "isolatedModules": true
   },
-  "include": ["src/**/*", "prisma/**/*", "jest.config.ts"],
+  "include": ["src/**/*", "prisma/**/*", "jest.config.ts", "test/**/*"],
   "exclude": ["node_modules", "dist", "prisma-client.d.ts"]
 }
