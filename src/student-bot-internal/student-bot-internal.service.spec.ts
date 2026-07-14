@@ -141,6 +141,44 @@ describe('StudentBotInternalService (unit, manual DI)', () => {
 
       expect(result).toEqual({ assignment: payload });
     });
+
+    it('should pass additionalInstructions through unchanged in the preview response', async () => {
+      repo.findStudentIdByTelegramId.mockResolvedValueOnce(7);
+      repo.isAssignmentAssignedToStudent.mockResolvedValueOnce({
+        id: 1,
+      } as any);
+      const payload = {
+        id: 1,
+        type: { name: 'definition_quiz' },
+        lesson: { additionalInstructions: 'Focus on listening.' },
+        questions: [],
+      };
+      repo.getAssignmentPayload.mockResolvedValueOnce(payload as any);
+
+      const result = await service.getAssignmentPreviewByTelegramId(12345, 1);
+
+      expect(result.assignment.lesson.additionalInstructions).toBe(
+        'Focus on listening.',
+      );
+    });
+
+    it('should pass a null additionalInstructions through unchanged in the preview response', async () => {
+      repo.findStudentIdByTelegramId.mockResolvedValueOnce(7);
+      repo.isAssignmentAssignedToStudent.mockResolvedValueOnce({
+        id: 1,
+      } as any);
+      const payload = {
+        id: 1,
+        type: { name: 'definition_quiz' },
+        lesson: { additionalInstructions: null },
+        questions: [],
+      };
+      repo.getAssignmentPayload.mockResolvedValueOnce(payload as any);
+
+      const result = await service.getAssignmentPreviewByTelegramId(12345, 1);
+
+      expect(result.assignment.lesson.additionalInstructions).toBeNull();
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -185,6 +223,27 @@ describe('StudentBotInternalService (unit, manual DI)', () => {
         appliesToQuestionTypes: ['gap_fill', 'open_text'],
       });
       expect(activity.touchUserLastVisit).toHaveBeenCalledWith(7);
+    });
+
+    it('should pass additionalInstructions through unchanged in the start response', async () => {
+      repo.findStudentIdByTelegramId.mockResolvedValueOnce(7);
+      repo.createNewAttemptAndGetPayload.mockResolvedValueOnce({
+        studentAssignment: { id: 55, attemptNo: 1, status: 'IN_PROGRESS' },
+        assignment: {
+          id: 1,
+          questions: [],
+          lesson: { additionalInstructions: 'Watch the video first.' },
+        },
+      } as any);
+
+      const result = await service.startNewAssignmentAttemptByTelegramId(
+        12345,
+        1,
+      );
+
+      expect(result.assignment.lesson.additionalInstructions).toBe(
+        'Watch the video first.',
+      );
     });
   });
 

@@ -165,6 +165,7 @@ export class StudentBotInternalRepository {
             level: true,
             ageCategory: true,
             topic: true,
+            additionalInstructions: true,
             vocab: {
               orderBy: { id: 'asc' },
               select: {
@@ -205,6 +206,7 @@ export class StudentBotInternalRepository {
         level: a.lesson.level ?? null,
         ageCategory: a.lesson.ageCategory ?? null,
         topic: a.lesson.topic ?? null,
+        additionalInstructions: a.lesson.additionalInstructions ?? null,
       },
 
       vocab: (a.lesson.vocab ?? []).map((v) => ({

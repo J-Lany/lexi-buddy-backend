@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 
+import { Prisma } from '@prisma/client';
 import { AuthService } from './auth.service';
 import { MailService } from 'common/modules/mail/mail.service';
 import { UserRepository } from 'repositories/user.repository';
@@ -9,6 +10,14 @@ import { UserContactRepository } from 'repositories/user-contact.repository';
 import { PasswordChangeRequestRepository } from 'repositories/password-change-request.repository';
 import { JwtService } from '@nestjs/jwt';
 import * as argon from 'argon2';
+
+function prismaUniqueConstraintError(target: string[] | string | undefined) {
+  return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+    code: 'P2002',
+    clientVersion: '5.15.0',
+    meta: target === undefined ? {} : { target },
+  });
+}
 
 jest.mock('argon2', () => ({
   hash: jest.fn(),
@@ -111,7 +120,12 @@ describe('AuthService (unit, manual DI)', () => {
       roleRepo.findGlobalRole.mockResolvedValueOnce(null as any);
 
       await expect(
-        service.register({ email: 'new@mail.com', password: '1234' } as any),
+        service.register({
+          email: 'new@mail.com',
+          password: '1234',
+          consentAccepted: true,
+          consentVersion: 1,
+        } as any),
       ).rejects.toThrow('Teacher role not found');
 
       expect(roleRepo.findGlobalRole).toHaveBeenCalledWith('teacher');
@@ -124,7 +138,12 @@ describe('AuthService (unit, manual DI)', () => {
       contactTypeRepo.findByName.mockResolvedValueOnce({ id: 2 } as any);
       userRepo.createUserByEmail.mockResolvedValueOnce({} as any);
 
-      await service.register({ email: 'ok@mail.com', password: '1234' } as any);
+      await service.register({
+        email: 'ok@mail.com',
+        password: '1234',
+        consentAccepted: true,
+        consentVersion: 1,
+      } as any);
 
       expect(roleRepo.findGlobalRole).toHaveBeenCalledWith('teacher');
       expect(contactTypeRepo.findByName).toHaveBeenCalledWith('email');
@@ -132,6 +151,314 @@ describe('AuthService (unit, manual DI)', () => {
         'ok@mail.com',
         expect.any(String),
       );
+    });
+
+    it.each([0, -1, 2, 999])(
+      'should reject an unsupported consent version (%s) before touching repositories',
+      async (consentVersion) => {
+        userContactRepo.findByEmail.mockResolvedValueOnce(null as any);
+
+        await expect(
+          service.register({
+            email: 'ok@mail.com',
+            password: '1234',
+            consentAccepted: true,
+            consentVersion,
+          } as any),
+        ).rejects.toThrow('Unsupported consent version');
+
+        expect(roleRepo.findGlobalRole).not.toHaveBeenCalled();
+        expect(userRepo.createUserByEmail).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should pass a server-created consent timestamp and the current version atomically into the same create call', async () => {
+      userContactRepo.findByEmail.mockResolvedValueOnce(null as any);
+      (argon.hash as jest.Mock).mockResolvedValueOnce('hashed-pass');
+      roleRepo.findGlobalRole.mockResolvedValueOnce({ id: 1 } as any);
+      contactTypeRepo.findByName.mockResolvedValueOnce({ id: 2 } as any);
+      userRepo.createUserByEmail.mockResolvedValueOnce({} as any);
+
+      const before = Date.now();
+      await service.register({
+        email: 'ok@mail.com',
+        password: '1234',
+        consentAccepted: true,
+        consentVersion: 1,
+      } as any);
+      const after = Date.now();
+
+      expect(userRepo.createUserByEmail).toHaveBeenCalledTimes(1);
+      const data = userRepo.createUserByEmail.mock.calls[0][0];
+      expect(data.consentVersion).toBe(1);
+      expect(data.consentAcceptedAt).toBeInstanceOf(Date);
+      expect(data.consentAcceptedAt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(data.consentAcceptedAt.getTime()).toBeLessThanOrEqual(after);
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // REGISTER TELEGRAM
+  // -------------------------------------------------------------------
+  describe('registerTelegram', () => {
+    const baseDto = {
+      telegramId: 555,
+      consentAccepted: true as const,
+      consentVersion: 1,
+      firstName: 'Ivan',
+      username: 'ivan_the_student',
+    };
+
+    function mockHappyPathDeps() {
+      userContactRepo.findByTelegram.mockResolvedValueOnce(null as any);
+      roleRepo.findGlobalRole.mockResolvedValueOnce({ id: 3 } as any);
+      contactTypeRepo.findByName.mockResolvedValueOnce({ id: 4 } as any);
+    }
+
+    it('should reject an unsupported consent version before any lookup', async () => {
+      await expect(
+        service.registerTelegram({ ...baseDto, consentVersion: 2 } as any),
+      ).rejects.toThrow('Unsupported consent version');
+
+      expect(userContactRepo.findByTelegram).not.toHaveBeenCalled();
+      expect(userRepo.createUserByTelegram).not.toHaveBeenCalled();
+    });
+
+    it('should return the existing user id (not throw) for a sequential duplicate registration', async () => {
+      userContactRepo.findByTelegram.mockResolvedValueOnce({
+        id: 9,
+        userId: 123,
+      } as any);
+
+      const result = await service.registerTelegram(baseDto as any);
+
+      expect(result).toEqual({ id: 123 });
+      expect(userRepo.createUserByTelegram).not.toHaveBeenCalled();
+      expect(roleRepo.findGlobalRole).not.toHaveBeenCalled();
+    });
+
+    it('should resolve a lost-response retry to the same id as the original successful registration, without re-creating anything', async () => {
+      // First request: genuinely creates the user.
+      mockHappyPathDeps();
+      userRepo.createUserByTelegram.mockResolvedValueOnce({ id: 200 } as any);
+      const first = await service.registerTelegram(baseDto as any);
+
+      // The HTTP response for the first request is "lost", so the bot
+      // retries with the identical payload. By now the Telegram contact
+      // exists, so the sequential pre-check must short-circuit to the
+      // same id — the create call must not run a second time.
+      userContactRepo.findByTelegram.mockResolvedValueOnce({
+        id: 9,
+        userId: 200,
+      } as any);
+      const retry = await service.registerTelegram(baseDto as any);
+
+      expect(first).toEqual({ id: 200 });
+      expect(retry).toEqual({ id: 200 });
+      expect(userRepo.createUserByTelegram).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not update the existing user (name/username/avatar/consent) on a sequential duplicate', async () => {
+      userContactRepo.findByTelegram.mockResolvedValueOnce({
+        id: 9,
+        userId: 123,
+      } as any);
+
+      await service.registerTelegram(baseDto as any);
+
+      // No repository write of any kind should occur for a duplicate — the
+      // duplicate must not be treated as a new consent event or an update.
+      expect(userRepo.createUserByTelegram).not.toHaveBeenCalled();
+      expect(userRepo.createUserByEmail).not.toHaveBeenCalled();
+    });
+
+    it('should throw if student role not found', async () => {
+      userContactRepo.findByTelegram.mockResolvedValueOnce(null as any);
+      roleRepo.findGlobalRole.mockResolvedValueOnce(null as any);
+
+      await expect(service.registerTelegram(baseDto as any)).rejects.toThrow(
+        'Student role not found',
+      );
+    });
+
+    it('should return exactly { id } on success, passing telegramId through unchanged (no || 0 fallback)', async () => {
+      mockHappyPathDeps();
+      userRepo.createUserByTelegram.mockResolvedValueOnce({
+        id: 42,
+        // Even if the repository mock returned extra fields, the service
+        // must only ever surface { id } to the controller/client.
+        passwordHash: null,
+        refreshTokenHash: 'should-never-leak',
+      } as any);
+
+      const result = await service.registerTelegram(baseDto as any);
+
+      expect(result).toEqual({ id: 42 });
+      expect(Object.keys(result)).toEqual(['id']);
+
+      const data = userRepo.createUserByTelegram.mock.calls[0][0];
+      expect(data.telegramId).toBe(555);
+    });
+
+    it('should pass a server-created consent timestamp and version atomically into the same create call', async () => {
+      mockHappyPathDeps();
+      userRepo.createUserByTelegram.mockResolvedValueOnce({ id: 1 } as any);
+
+      const before = Date.now();
+      await service.registerTelegram(baseDto as any);
+      const after = Date.now();
+
+      const data = userRepo.createUserByTelegram.mock.calls[0][0];
+      expect(data.consentVersion).toBe(1);
+      expect(data.consentAcceptedAt).toBeInstanceOf(Date);
+      expect(data.consentAcceptedAt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(data.consentAcceptedAt.getTime()).toBeLessThanOrEqual(after);
+    });
+
+    it('should recover from a concurrent create race (P2002 on the Telegram contact unique constraint) by re-looking-up and returning the existing user id', async () => {
+      mockHappyPathDeps();
+      userRepo.createUserByTelegram.mockRejectedValueOnce(
+        prismaUniqueConstraintError(['contactTypeId', 'contactValue']),
+      );
+      // Second call: the concurrent request's re-lookup after the race.
+      userContactRepo.findByTelegram.mockResolvedValueOnce({
+        userId: 77,
+      } as any);
+
+      const result = await service.registerTelegram(baseDto as any);
+
+      expect(result).toEqual({ id: 77 });
+      expect(userContactRepo.findByTelegram).toHaveBeenCalledTimes(2);
+    });
+
+    it('should return the same id shape for a sequential duplicate and a concurrent race resolving to the same winner', async () => {
+      // Sequential duplicate path.
+      userContactRepo.findByTelegram.mockResolvedValueOnce({
+        id: 9,
+        userId: 300,
+      } as any);
+      const sequentialResult = await service.registerTelegram(baseDto as any);
+
+      // Concurrent race path, resolving to the same underlying winner id.
+      mockHappyPathDeps();
+      userRepo.createUserByTelegram.mockRejectedValueOnce(
+        prismaUniqueConstraintError(['contactTypeId', 'contactValue']),
+      );
+      userContactRepo.findByTelegram.mockResolvedValueOnce({
+        userId: 300,
+      } as any);
+      const raceResult = await service.registerTelegram(baseDto as any);
+
+      expect(sequentialResult).toEqual({ id: 300 });
+      expect(raceResult).toEqual({ id: 300 });
+      expect(Object.keys(sequentialResult)).toEqual(['id']);
+      expect(Object.keys(raceResult)).toEqual(['id']);
+    });
+
+    it('should NOT mask an unrelated unique-constraint violation (e.g. username) as Telegram idempotency', async () => {
+      mockHappyPathDeps();
+      const unrelatedError = prismaUniqueConstraintError(['username']);
+      userRepo.createUserByTelegram.mockRejectedValueOnce(unrelatedError);
+
+      await expect(service.registerTelegram(baseDto as any)).rejects.toBe(
+        unrelatedError,
+      );
+      // Must not have attempted the idempotency re-lookup for an unrelated conflict.
+      expect(userContactRepo.findByTelegram).toHaveBeenCalledTimes(1);
+    });
+
+    it("two parallel calls do not create two users: the loser resolves to the winner's id", async () => {
+      mockHappyPathDeps();
+      roleRepo.findGlobalRole.mockResolvedValueOnce({ id: 3 } as any);
+      contactTypeRepo.findByName.mockResolvedValueOnce({ id: 4 } as any);
+      userContactRepo.findByTelegram.mockResolvedValueOnce(null as any);
+
+      userRepo.createUserByTelegram
+        .mockResolvedValueOnce({ id: 100 } as any) // winner
+        .mockRejectedValueOnce(
+          prismaUniqueConstraintError(['contactTypeId', 'contactValue']),
+        ); // loser
+      userContactRepo.findByTelegram.mockResolvedValueOnce({
+        userId: 100,
+      } as any);
+
+      const [a, b] = await Promise.all([
+        service.registerTelegram(baseDto as any),
+        service.registerTelegram(baseDto as any),
+      ]);
+
+      const ids = [a.id, b.id];
+      expect(ids).toContain(100);
+      expect(new Set(ids).size).toBe(1);
+    });
+
+    // -----------------------------------------------------------------
+    // P2002 target-shape detection
+    // -----------------------------------------------------------------
+    describe('P2002 meta.target shape handling', () => {
+      it('recognizes an array target containing both field names', async () => {
+        mockHappyPathDeps();
+        userRepo.createUserByTelegram.mockRejectedValueOnce(
+          prismaUniqueConstraintError(['contactTypeId', 'contactValue']),
+        );
+        userContactRepo.findByTelegram.mockResolvedValueOnce({
+          userId: 88,
+        } as any);
+
+        const result = await service.registerTelegram(baseDto as any);
+        expect(result).toEqual({ id: 88 });
+      });
+
+      it('recognizes the named-constraint string target', async () => {
+        mockHappyPathDeps();
+        userRepo.createUserByTelegram.mockRejectedValueOnce(
+          prismaUniqueConstraintError(
+            'UserContact_contactTypeId_contactValue_key',
+          ),
+        );
+        userContactRepo.findByTelegram.mockResolvedValueOnce({
+          userId: 89,
+        } as any);
+
+        const result = await service.registerTelegram(baseDto as any);
+        expect(result).toEqual({ id: 89 });
+      });
+
+      it('does NOT recognize the username constraint (string form)', async () => {
+        mockHappyPathDeps();
+        const unrelatedError = prismaUniqueConstraintError('User_username_key');
+        userRepo.createUserByTelegram.mockRejectedValueOnce(unrelatedError);
+
+        await expect(service.registerTelegram(baseDto as any)).rejects.toBe(
+          unrelatedError,
+        );
+        expect(userContactRepo.findByTelegram).toHaveBeenCalledTimes(1);
+      });
+
+      it('does NOT recognize a missing/unknown target', async () => {
+        mockHappyPathDeps();
+        const unknownError = prismaUniqueConstraintError(undefined);
+        userRepo.createUserByTelegram.mockRejectedValueOnce(unknownError);
+
+        await expect(service.registerTelegram(baseDto as any)).rejects.toBe(
+          unknownError,
+        );
+        expect(userContactRepo.findByTelegram).toHaveBeenCalledTimes(1);
+      });
+
+      it('rethrows the original error instead of fabricating success when a recognized conflict re-lookup finds no user', async () => {
+        mockHappyPathDeps();
+        const raceError = prismaUniqueConstraintError([
+          'contactTypeId',
+          'contactValue',
+        ]);
+        userRepo.createUserByTelegram.mockRejectedValueOnce(raceError);
+        userContactRepo.findByTelegram.mockResolvedValueOnce(null as any);
+
+        await expect(service.registerTelegram(baseDto as any)).rejects.toBe(
+          raceError,
+        );
+      });
     });
   });
 

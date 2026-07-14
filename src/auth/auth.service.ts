@@ -7,9 +7,14 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as argon from 'argon2';
+import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { JwtService } from '@nestjs/jwt';
 import { MailService } from 'common/modules/mail/mail.service';
+import {
+  CURRENT_TEACHER_CONSENT_VERSION,
+  CURRENT_TELEGRAM_CONSENT_VERSION,
+} from 'common/constants/consent';
 import { RegisterDto } from './dto/register.dto/register.dto';
 import { UserRepository } from 'repositories/user.repository';
 import { ContactTypeRepository } from 'repositories/contact-type.repository';
@@ -47,6 +52,10 @@ export class AuthService {
 
     if (exist) throw new BadRequestException('Email already exist');
 
+    if (dto.consentVersion !== CURRENT_TEACHER_CONSENT_VERSION) {
+      throw new BadRequestException('Unsupported consent version');
+    }
+
     const passwordHash = await argon.hash(dto.password);
     const activationToken = randomUUID();
 
@@ -66,6 +75,8 @@ export class AuthService {
       activationExpires: new Date(Date.now() + 86400000),
       email: dto.email,
       contactTypeId: contactType.id,
+      consentAcceptedAt: new Date(),
+      consentVersion: dto.consentVersion,
     };
 
     await this.userRepo.createUserByEmail(data);
@@ -74,9 +85,20 @@ export class AuthService {
     return { message: 'Activation email sent' };
   }
 
-  async registerTelegram(dto: RegisterTelegramDto) {
+  async registerTelegram(dto: RegisterTelegramDto): Promise<{ id: number }> {
+    if (dto.consentVersion !== CURRENT_TELEGRAM_CONSENT_VERSION) {
+      throw new BadRequestException('Unsupported consent version');
+    }
+
+    // Idempotent: a sequential duplicate (including a bot retry after a lost
+    // HTTP response for a registration that already succeeded) must resolve
+    // to the SAME { id } contract as a fresh registration — never re-throw,
+    // and never touch the existing user's name/username/avatar/consent
+    // metadata.
     const existing = await this.userContactRepo.findByTelegram(dto.telegramId);
-    if (existing) throw new BadRequestException('Telegram user already exists');
+    if (existing) {
+      return { id: existing.userId };
+    }
 
     const role = await this.roleRepo.findGlobalRole('student');
 
@@ -101,15 +123,79 @@ export class AuthService {
       avatarUrl = null;
     }
 
-    return await this.userRepo.createUserByTelegram({
-      firstName: dto.firstName,
-      lastName: dto.lastName,
-      roleId: role.id,
-      username: dto.username,
-      telegramId: dto.telegramId || 0,
-      contactTypeId: contactType.id,
-      avatarUrl,
-    });
+    try {
+      const created = await this.userRepo.createUserByTelegram({
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        roleId: role.id,
+        username: dto.username,
+        telegramId: dto.telegramId,
+        contactTypeId: contactType.id,
+        avatarUrl,
+        consentAcceptedAt: new Date(),
+        consentVersion: dto.consentVersion,
+      });
+
+      return { id: created.id };
+    } catch (e) {
+      // A parallel/redelivered request can lose a race to another request
+      // that already created the same Telegram contact between our
+      // pre-check above and this create. Only treat that specific unique
+      // conflict as idempotent success — anything else (e.g. a username
+      // clash, which also has a unique constraint on User) must surface
+      // unchanged so it isn't silently masked as Telegram idempotency.
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002' &&
+        this.isTelegramContactUniqueViolation(e)
+      ) {
+        const raceWinner = await this.userContactRepo.findByTelegram(
+          dto.telegramId,
+        );
+        if (raceWinner) {
+          return { id: raceWinner.userId };
+        }
+        // The conflict really was on the Telegram-contact constraint, but the
+        // re-lookup unexpectedly found nothing (e.g. the winning transaction
+        // rolled back afterwards). Never fabricate a success response here —
+        // surface the original error so it fails loudly instead of silently.
+        throw e;
+      }
+      throw e;
+    }
+  }
+
+  // The Telegram-contact compound unique constraint is
+  // @@unique([contactTypeId, contactValue]) on UserContact, which Postgres
+  // names "UserContact_contactTypeId_contactValue_key". Depending on how the
+  // conflict surfaces, Prisma's P2002 `meta.target` can be either the array
+  // of column names or that constraint name as a single string — support
+  // both, but require both field names to be present so an unrelated
+  // constraint (e.g. User.username) is never misclassified.
+  private static readonly TELEGRAM_CONTACT_UNIQUE_CONSTRAINT_NAME =
+    'UserContact_contactTypeId_contactValue_key';
+
+  private isTelegramContactUniqueViolation(
+    e: Prisma.PrismaClientKnownRequestError,
+  ): boolean {
+    const target = e.meta?.target;
+
+    if (Array.isArray(target)) {
+      return (
+        target.includes('contactTypeId') && target.includes('contactValue')
+      );
+    }
+
+    if (typeof target === 'string') {
+      if (target === AuthService.TELEGRAM_CONTACT_UNIQUE_CONSTRAINT_NAME) {
+        return true;
+      }
+      return (
+        target.includes('contactTypeId') && target.includes('contactValue')
+      );
+    }
+
+    return false;
   }
 
   async activate(token: string) {

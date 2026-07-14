@@ -23,6 +23,8 @@ export class UserRepository {
     activationExpires: Date;
     email: string;
     contactTypeId: number;
+    consentAcceptedAt: Date;
+    consentVersion: number;
   }) {
     await this.prisma.user.create({
       data: {
@@ -30,6 +32,8 @@ export class UserRepository {
         roleId: data.roleId,
         activationToken: data.activationToken,
         activationExpires: data.activationExpires,
+        consentAcceptedAt: data.consentAcceptedAt,
+        consentVersion: data.consentVersion,
         contacts: {
           create: {
             contactValue: data.email,
@@ -49,7 +53,9 @@ export class UserRepository {
     username?: string;
     contactTypeId: number;
     avatarUrl?: string | null;
-  }) {
+    consentAcceptedAt: Date;
+    consentVersion: number;
+  }): Promise<{ id: number }> {
     return this.prisma.user.create({
       data: {
         firstName: data.firstName,
@@ -59,6 +65,8 @@ export class UserRepository {
         passwordHash: null,
         verified: true,
         username: data.username,
+        consentAcceptedAt: data.consentAcceptedAt,
+        consentVersion: data.consentVersion,
         contacts: {
           create: {
             contactValue: String(data.telegramId),
@@ -68,6 +76,7 @@ export class UserRepository {
           },
         },
       },
+      select: { id: true },
     });
   }
 

@@ -101,6 +101,10 @@ model User {
   activationToken   String?
   activationExpires DateTime?
 
+  // Согласие с Пользовательским соглашением / Политикой конфиденциальности / ПДн
+  consentAcceptedAt DateTime?
+  consentVersion    Int?
+
   // Связи
   contacts             UserContact[]
   groupMemberships     GroupMember[]

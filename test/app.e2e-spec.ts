@@ -25,7 +25,7 @@ const createPrismaMock = () => ({
   },
   userContact: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn() },
   role: { findFirst: jest.fn() },
-  contactType: { findUnique: jest.fn() },
+  contactType: { findUnique: jest.fn(), findFirst: jest.fn() },
   groupMember: { findMany: jest.fn() },
   lesson: { findMany: jest.fn(), findUnique: jest.fn() },
   assignment: { findMany: jest.fn() },
@@ -41,6 +41,7 @@ describe('App (e2e)', () => {
   let prismaMock: ReturnType<typeof createPrismaMock>;
 
   beforeAll(async () => {
+    process.env.TELEGRAM_BOT_INTERNAL_TOKEN = 'test-internal-token';
     prismaMock = createPrismaMock();
 
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -141,6 +142,128 @@ describe('App (e2e)', () => {
         .send({})
         .expect(400);
     });
+
+    const validBase = {
+      email: 'valid@example.com',
+      password: 'Password1!',
+    };
+
+    it('should return 400 when consentAccepted is missing', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ ...validBase, consentVersion: 1 })
+        .expect(400);
+    });
+
+    it('should return 400 when consentAccepted is false', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ ...validBase, consentAccepted: false, consentVersion: 1 })
+        .expect(400);
+    });
+
+    // The exhaustive consentAccepted/consentVersion type-validation matrix
+    // (missing/decimal/string/etc.) lives in register.dto.spec.ts, run
+    // directly against class-validator — identical decorators to what the
+    // global ValidationPipe runs, without the cost of going through HTTP
+    // (this route is rate-limited to 10 req/60s, so only a few
+    // representative full-stack checks are kept here).
+    it('should return 400 when consentVersion does not match the current supported version', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ ...validBase, consentAccepted: true, consentVersion: 999 })
+        .expect(400);
+    });
+
+    it('should accept the current supported consent version and register successfully', async () => {
+      prismaMock.userContact.findFirst.mockResolvedValueOnce(null);
+      prismaMock.role.findFirst.mockResolvedValueOnce({ id: 1 });
+      prismaMock.contactType.findFirst.mockResolvedValueOnce({ id: 2 });
+      prismaMock.user.create.mockResolvedValueOnce({ id: 1 });
+
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ ...validBase, consentAccepted: true, consentVersion: 1 })
+        .expect(201);
+
+      expect(prismaMock.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            consentVersion: 1,
+            consentAcceptedAt: expect.any(Date),
+          }),
+        }),
+      );
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // POST /auth/register/telegram
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('POST /auth/register/telegram', () => {
+    const INTERNAL_TOKEN = 'test-internal-token';
+    const validTelegramBody = {
+      telegramId: 555,
+      consentAccepted: true,
+      consentVersion: 1,
+    };
+
+    function post(body: Record<string, unknown>, token?: string) {
+      const req = request(app.getHttpServer())
+        .post('/auth/register/telegram')
+        .send(body);
+      if (token !== undefined) req.set('x-internal-token', token);
+      return req;
+    }
+
+    it('should return 401 when the internal token header is missing', async () => {
+      await post(validTelegramBody).expect(401);
+    });
+
+    it('should return 401 when the internal token is wrong', async () => {
+      await post(validTelegramBody, 'wrong-token').expect(401);
+    });
+
+    // The exhaustive telegramId/consentAccepted/consentVersion type-validation
+    // matrix lives in register-telegram.dto.spec.ts, run directly against
+    // class-validator (same decorators the global ValidationPipe runs),
+    // without HTTP overhead — this route is rate-limited to 10 req/60s, so
+    // only a few representative full-stack checks are kept here.
+    it('should return 400 when telegramId is 0 (real endpoint, guard + DTO + pipe together)', async () => {
+      await post(
+        { ...validTelegramBody, telegramId: 0 },
+        INTERNAL_TOKEN,
+      ).expect(400);
+    });
+
+    it('should return 400 when consentVersion does not match the supported version', async () => {
+      await post(
+        { ...validTelegramBody, consentVersion: 2 },
+        INTERNAL_TOKEN,
+      ).expect(400);
+    });
+
+    it('should return exactly { id } on success, with no sensitive User fields', async () => {
+      prismaMock.userContact.findFirst.mockResolvedValueOnce(null);
+      prismaMock.role.findFirst.mockResolvedValueOnce({ id: 3 });
+      prismaMock.contactType.findFirst.mockResolvedValueOnce({ id: 4 });
+      prismaMock.user.create.mockResolvedValueOnce({ id: 777 });
+
+      const res = await post(validTelegramBody, INTERNAL_TOKEN).expect(201);
+
+      expect(res.body).toEqual({ id: 777 });
+    });
+
+    it('should return { id } (not an error) when the Telegram user already exists — idempotent duplicate', async () => {
+      prismaMock.userContact.findFirst.mockResolvedValueOnce({
+        id: 1,
+        userId: 42,
+      });
+
+      const res = await post(validTelegramBody, INTERNAL_TOKEN).expect(201);
+      expect(res.body).toEqual({ id: 42 });
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -233,9 +356,14 @@ describe('App (e2e)', () => {
         .send({ email: 'teacher@example.com', password: 'Password1!' })
         .expect(201);
 
-      const cookies = res.headers['set-cookie'] as string[];
-      expect(cookies).toBeDefined();
-      const cookieStr = Array.isArray(cookies) ? cookies.join('; ') : cookies;
+      const setCookie: unknown = res.headers['set-cookie'];
+      const cookies: string[] = Array.isArray(setCookie)
+        ? (setCookie as string[])
+        : typeof setCookie === 'string'
+          ? [setCookie]
+          : [];
+      expect(cookies.length).toBeGreaterThan(0);
+      const cookieStr = cookies.join('; ');
       expect(cookieStr).toContain('access_token');
       expect(cookieStr).toContain('refresh_token');
       expect(cookieStr).toContain('HttpOnly');
@@ -262,7 +390,12 @@ describe('App (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/auth/register')
-        .send({ email: 'user@example.com', password: 'Password1!' })
+        .send({
+          email: 'user@example.com',
+          password: 'Password1!',
+          consentAccepted: true,
+          consentVersion: 1,
+        })
         .expect(500);
 
       expect(res.body).not.toHaveProperty('stack');

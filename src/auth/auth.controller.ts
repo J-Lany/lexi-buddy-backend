@@ -22,6 +22,7 @@ import {
   ApiOkResponse,
   ApiNotFoundResponse,
   ApiUnauthorizedResponse,
+  ApiSecurity,
 } from '@nestjs/swagger';
 import { Response, Request } from 'express';
 import { AuthService } from './auth.service';
@@ -51,16 +52,22 @@ export class AuthController {
     return this.authService.register(dto);
   }
 
+  @UseGuards(InternalTokenGuard)
+  @ApiSecurity('internal-token')
   @Throttle({ default: { ttl: 60_000, limit: 10 } })
   @Post('register/telegram')
-  @ApiOperation({ summary: 'Register user using Telegram ID and username' })
+  @ApiOperation({
+    summary:
+      'Register user using Telegram ID and username (internal, bot-only)',
+  })
   @ApiCreatedResponse({
     description: 'User registered and Telegram contact created',
   })
   @ApiBadRequestResponse({
     description: 'Username already exists or Telegram contact type not found',
   })
-  registerTelegram(@Body() dto: RegisterTelegramDto) {
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid internal token' })
+  registerTelegram(@Body() dto: RegisterTelegramDto): Promise<{ id: number }> {
     return this.authService.registerTelegram(dto);
   }
 
