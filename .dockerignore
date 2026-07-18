@@ -1,6 +1,27 @@
+# --- базовые ---
 node_modules
+npm-debug.log
+yarn-error.log
+.DS_Store
+
+# --- git ---
 .git
 .gitignore
+
+# --- IDE ---
+.idea
+
+# --- environment ---
+.env
+
+# --- build artifacts ---
+dist
+out
+coverage
+
+# --- CI/CD ---
 Dockerfile
 README.md
-.env
+
+# --- dev tools ---
+.husky

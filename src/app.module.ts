@@ -1,10 +1,42 @@
-import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ConfigModule } from '@nestjs/config';
+import { AuthModule } from 'auth/auth.module';
+import { MailModule } from 'common/modules/mail/mail.module';
+import { PrismaModule } from 'common/modules/prisma/prisma.module';
+import { StudentsModule } from 'students/students.module';
+import { GroupsModule } from 'groups/groups.module';
+import { TeacherRequestsModule } from 'common/modules/teacher-requests/teacher-requests.module';
+import { TelegramNotificationsModule } from 'common/modules/notifications/telegram-notifications.module';
+import { LessonsModule } from 'lessons/lessons.module';
+import { StudentBotInternalModule } from 'student-bot-internal/student-bot-internal.module';
+import { RequestIdMiddleware } from 'common/middleware/request-id.middleware';
+import { HealthController } from 'health/health.controller';
+import { AdminMetricsModule } from 'admin-metrics/admin-metrics.module';
 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [
+    AuthModule,
+    MailModule,
+    PrismaModule,
+    StudentsModule,
+    GroupsModule,
+    TeacherRequestsModule,
+    TelegramNotificationsModule,
+    StudentBotInternalModule,
+    AdminMetricsModule,
+    LessonsModule,
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 60 }]),
+  ],
+  controllers: [HealthController],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RequestIdMiddleware).forRoutes('*');
+  }
+}

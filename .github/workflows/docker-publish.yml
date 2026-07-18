@@ -1,8 +1,8 @@
-name: Build & Publish Docker image
+name: Build & Publish Docker image (Backend)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
     tags: [ "v*" ]
 
 jobs:
@@ -23,20 +23,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Extract branch name
+        id: branch
+        run: echo "BRANCH=${GITHUB_REF##*/}" >> $GITHUB_ENV
+
+      - name: Build and push image
         uses: docker/build-push-action@v5
         env:
           BUILDKIT_PROGRESS: plain
         with:
           context: .
           push: true
-          tags: ghcr.io/j-lany/lexi-buddy-backend:main
           provenance: false
-          outputs: type=image,name=ghcr.io/j-lany/lexi-buddy-backend:main
+          tags: |
+            ghcr.io/j-lany/lexi-buddy-backend:${{ env.BRANCH }}
+            ghcr.io/j-lany/lexi-buddy-backend:${{ github.sha }}
 
       - name: Trigger Infra Deploy
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.INFRA_TRIGGER_TOKEN }}
           repository: J-Lany/lexi-buddy-infra
-          event-type: deploy
+          event-type: deploy-${{ env.BRANCH }}
+          client-payload: '{"ref": "${{ env.BRANCH }}"}'

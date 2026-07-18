@@ -1,9 +1,23 @@
 {
   "moduleFileExtensions": ["js", "json", "ts"],
-  "rootDir": ".",
+  "rootDir": "..",
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "moduleNameMapper": {
+    "^auth/(.*)$": "<rootDir>/src/auth/$1",
+    "^repositories/(.*)$": "<rootDir>/src/repositories/$1",
+    "^common/(.*)$": "<rootDir>/src/common/$1",
+    "^ai/(.*)$": "<rootDir>/src/ai/$1",
+    "^lessons/(.*)$": "<rootDir>/src/lessons/$1",
+    "^students/(.*)$": "<rootDir>/src/students/$1",
+    "^groups/(.*)$": "<rootDir>/src/groups/$1",
+    "^health/(.*)$": "<rootDir>/src/health/$1",
+    "^admin-metrics/(.*)$": "<rootDir>/src/admin-metrics/$1",
+    "^student-bot-internal/(.*)$": "<rootDir>/src/student-bot-internal/$1",
+    "^storage/(.*)$": "<rootDir>/src/common/modules/storage/$1",
+    "^app\\.module$": "<rootDir>/src/app.module"
   }
 }

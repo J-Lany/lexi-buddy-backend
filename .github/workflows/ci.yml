@@ -17,4 +17,9 @@ jobs:
       - run: npm ci
       - run: npm run lint --if-present
       - run: npm test --if-present
+      - name: E2E tests
+        run: npm run test:e2e
+        env:
+          JWT_SECRET: ci-test-jwt-secret-not-used-in-prod
+          RESEND_API_KEY: re_ci_dummy_key
       - run: npm run build
