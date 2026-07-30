@@ -1,9 +1,10 @@
 import {
   CanActivate,
   ExecutionContext,
-  ForbiddenException,
+  HttpStatus,
   Injectable,
 } from '@nestjs/common';
+import { AppException } from 'common/errors';
 import { UserRepository } from 'repositories/user.repository';
 
 @Injectable()
@@ -20,9 +21,14 @@ export class AdminGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     const userId: number = request.user?.sub;
-    if (!userId) return false;
 
-    if (this.adminEmails.length === 0) return false;
+    // An admin-contour access attempt without a valid admin identity is
+    // always logged at 'warn', regardless of which check below rejected it.
+    if (!userId || this.adminEmails.length === 0) {
+      throw new AppException(HttpStatus.FORBIDDEN, 'FORBIDDEN', {
+        logLevel: 'warn',
+      });
+    }
 
     const user = await this.userRepo.findByIdWithContacts(userId);
     const email = user?.contacts
@@ -30,7 +36,9 @@ export class AdminGuard implements CanActivate {
       ?.contactValue?.toLowerCase();
 
     if (!email || !this.adminEmails.includes(email)) {
-      throw new ForbiddenException();
+      throw new AppException(HttpStatus.FORBIDDEN, 'FORBIDDEN', {
+        logLevel: 'warn',
+      });
     }
 
     return true;

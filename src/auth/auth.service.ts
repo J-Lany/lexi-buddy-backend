@@ -1,16 +1,18 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import * as argon from 'argon2';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { JwtService } from '@nestjs/jwt';
 import { MailService } from 'common/modules/mail/mail.service';
+import { AppException } from 'common/errors';
+import { maskEmail } from 'common/utils/mask-email';
 import {
   CURRENT_TEACHER_CONSENT_VERSION,
   CURRENT_TELEGRAM_CONSENT_VERSION,
@@ -31,6 +33,13 @@ import { RequestPasswordChangeDto } from './dto/request-password-change.dto';
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly secret: string;
+  // Computed once per process (never per login request) so that verifying a
+  // password for a nonexistent user/account takes a comparable amount of
+  // time to a real password check — this is what closes the "unknown email
+  // fails immediately" timing oracle in login(). The value itself is not a
+  // secret: it never needs to match any real password.
+  private readonly dummyPasswordHash: Promise<string>;
+
   constructor(
     private mail: MailService,
     private jwt: JwtService,
@@ -45,12 +54,15 @@ export class AuthService {
     if (!secret)
       throw new Error('JWT_SECRET must be set in environment variables');
     this.secret = secret;
+    this.dummyPasswordHash = argon.hash(randomUUID());
   }
 
   async register(dto: RegisterDto) {
     const exist = await this.userContactRepo.findByEmail(dto.email);
 
-    if (exist) throw new BadRequestException('Email already exist');
+    if (exist) {
+      throw new AppException(HttpStatus.CONFLICT, 'AUTH_EMAIL_ALREADY_EXISTS');
+    }
 
     if (dto.consentVersion !== CURRENT_TEACHER_CONSENT_VERSION) {
       throw new BadRequestException('Unsupported consent version');
@@ -202,7 +214,7 @@ export class AuthService {
     const user = await this.userRepo.findByActivationToken(token);
 
     if (!user) {
-      throw new BadRequestException('Invalid token');
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
     }
 
     if (user.verified) {
@@ -213,7 +225,7 @@ export class AuthService {
 
     if (!user.activationExpires || user.activationExpires < now) {
       await this.userRepo.deleteUser(user.id);
-      throw new BadRequestException('Activation token expired');
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_TOKEN_EXPIRED');
     }
 
     await this.userRepo.updateUserVerification(user.id);
@@ -244,17 +256,39 @@ export class AuthService {
     const { email, password } = dto;
     const user = await this.userRepo.findByEmail(email);
 
-    if (!user || !user.passwordHash) {
-      throw new UnauthorizedException('User by this email is not found');
-    }
+    // Always run one Argon2 verify against a real-shaped hash — for a
+    // nonexistent user (or a user without a password hash, e.g. a
+    // Telegram-only account) we verify against a fixed dummy hash instead of
+    // returning early. This keeps a "no such user" login and a "wrong
+    // password" login taking a comparable amount of time, closing the most
+    // obvious timing oracle for user enumeration.
+    const hashToVerify = user?.passwordHash ?? (await this.dummyPasswordHash);
+    const passwordMatches = await argon
+      .verify(hashToVerify, password)
+      .catch(() => false);
 
-    if (!user.verified) {
-      throw new UnauthorizedException('Email not verified. Check your mailbox');
-    }
+    // `verified` is intentionally checked only after the password verify
+    // above — checking it earlier (or exiting before argon.verify runs)
+    // would reintroduce a timing/enumeration difference for unverified
+    // accounts.
+    if (!user || !user.passwordHash || !passwordMatches || !user.verified) {
+      let reason: string;
+      if (!user) reason = 'user not found';
+      else if (!user.passwordHash) reason = 'no password hash on account';
+      else if (!passwordMatches) reason = 'password mismatch';
+      else reason = 'email not verified';
 
-    const isValid = await argon.verify(user.passwordHash, password);
-    if (!isValid) {
-      throw new UnauthorizedException('Invalid password');
+      this.logger.debug(
+        `Login rejected. email=${maskEmail(email)} reason=${reason}`,
+      );
+
+      // Deliberately identical for all branches above: user-not-found,
+      // wrong-password, and unverified-email must be indistinguishable to
+      // the client.
+      throw new AppException(
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
     }
 
     const payload = { sub: user.id, roleId: user.roleId };
@@ -338,7 +372,10 @@ export class AuthService {
 
   async requestPasswordChange(userId: number, dto: RequestPasswordChangeDto) {
     if (dto.password !== dto.confirmPassword) {
-      throw new BadRequestException('Passwords do not match');
+      throw new AppException(
+        HttpStatus.BAD_REQUEST,
+        'AUTH_PASSWORDS_DO_NOT_MATCH',
+      );
     }
 
     const user = await this.userRepo.findByIdWithContacts(userId);
@@ -368,10 +405,12 @@ export class AuthService {
   async confirmPasswordChange(token: string) {
     const request = await this.passwordChangeRepo.findByToken(token);
 
-    if (!request) throw new BadRequestException('Invalid or expired token');
+    if (!request) {
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
+    }
     if (request.expiresAt < new Date()) {
       await this.passwordChangeRepo.deleteByUserId(request.userId);
-      throw new BadRequestException('Token has expired');
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_TOKEN_EXPIRED');
     }
 
     await this.userRepo.updatePasswordHash(
@@ -414,8 +453,10 @@ export class AuthService {
       await this.userRepo.updateRefreshTokenHash(user.id, newRefreshHash);
 
       return { accessToken: newAccessToken, refreshToken: newRefreshToken };
-    } catch {
-      throw new UnauthorizedException('Invalid or expired refresh token');
+    } catch (err) {
+      throw new AppException(HttpStatus.UNAUTHORIZED, 'AUTH_SESSION_EXPIRED', {
+        internalReason: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }

@@ -1,10 +1,11 @@
 import {
   CanActivate,
   ExecutionContext,
+  HttpStatus,
   Injectable,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { timingSafeEqual } from 'crypto';
+import { AppException } from 'common/errors';
 
 @Injectable()
 export class InternalTokenGuard implements CanActivate {
@@ -14,13 +15,19 @@ export class InternalTokenGuard implements CanActivate {
 
     const expected = process.env.TELEGRAM_BOT_INTERNAL_TOKEN;
     if (!expected) {
-      throw new UnauthorizedException(
-        'TELEGRAM_BOT_INTERNAL_TOKEN is not configured',
-      );
+      // Ops misconfiguration, not a client error — never tell the caller
+      // the env var is missing, but flag it loudly in logs.
+      throw new AppException(HttpStatus.UNAUTHORIZED, 'AUTH_UNAUTHENTICATED', {
+        internalReason: 'TELEGRAM_BOT_INTERNAL_TOKEN is not configured',
+        logLevel: 'error',
+      });
     }
 
     if (!token || token.length !== expected.length) {
-      throw new UnauthorizedException('Unauthorized');
+      throw new AppException(HttpStatus.UNAUTHORIZED, 'AUTH_UNAUTHENTICATED', {
+        internalReason: 'internal token missing or wrong length',
+        logLevel: 'warn',
+      });
     }
 
     const tokensMatch = timingSafeEqual(
@@ -29,7 +36,10 @@ export class InternalTokenGuard implements CanActivate {
     );
 
     if (!tokensMatch) {
-      throw new UnauthorizedException('Unauthorized');
+      throw new AppException(HttpStatus.UNAUTHORIZED, 'AUTH_UNAUTHENTICATED', {
+        internalReason: 'internal token mismatch',
+        logLevel: 'warn',
+      });
     }
 
     return true;

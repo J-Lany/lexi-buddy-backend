@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
+import { maskEmail } from 'common/utils/mask-email';
 
 export const RESEND_CLIENT = Symbol('RESEND_CLIENT');
 
@@ -58,7 +59,7 @@ export class MailService {
 
       if (response.error) {
         this.logger.error(
-          `Failed to send activation email. recipient=${this.maskEmail(email)} providerError=${this.stringifyProviderError(response.error)}`,
+          `Failed to send activation email. recipient=${maskEmail(email)} providerError=${this.stringifyProviderError(response.error)}`,
         );
         throw new InternalServerErrorException(
           'Failed to send activation email',
@@ -66,7 +67,7 @@ export class MailService {
       }
 
       this.logger.log(
-        `Activation email sent. recipient=${this.maskEmail(email)} emailId=${response.data?.id ?? 'unknown'}`,
+        `Activation email sent. recipient=${maskEmail(email)} emailId=${response.data?.id ?? 'unknown'}`,
       );
     } catch (error) {
       if (error instanceof InternalServerErrorException) {
@@ -77,7 +78,7 @@ export class MailService {
         error instanceof Error ? error.message : 'Unknown unexpected error';
 
       this.logger.error(
-        `Unexpected error while sending activation email. recipient=${this.maskEmail(email)} error=${message}`,
+        `Unexpected error while sending activation email. recipient=${maskEmail(email)} error=${message}`,
       );
 
       throw new InternalServerErrorException('Failed to send activation email');
@@ -126,7 +127,7 @@ export class MailService {
 
       if (response.error) {
         this.logger.error(
-          `Failed to send password change email. recipient=${this.maskEmail(email)} providerError=${this.stringifyProviderError(response.error)}`,
+          `Failed to send password change email. recipient=${maskEmail(email)} providerError=${this.stringifyProviderError(response.error)}`,
         );
         throw new InternalServerErrorException(
           'Failed to send password change email',
@@ -134,7 +135,7 @@ export class MailService {
       }
 
       this.logger.log(
-        `Password change email sent. recipient=${this.maskEmail(email)} emailId=${response.data?.id ?? 'unknown'}`,
+        `Password change email sent. recipient=${maskEmail(email)} emailId=${response.data?.id ?? 'unknown'}`,
       );
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
@@ -143,7 +144,7 @@ export class MailService {
         error instanceof Error ? error.message : 'Unknown unexpected error';
 
       this.logger.error(
-        `Unexpected error while sending password change email. recipient=${this.maskEmail(email)} error=${message}`,
+        `Unexpected error while sending password change email. recipient=${maskEmail(email)} error=${message}`,
       );
 
       throw new InternalServerErrorException(
@@ -209,15 +210,6 @@ export class MailService {
       'Activate your account using the link below:',
       activationUrl,
     ].join('\n');
-  }
-
-  private maskEmail(email: string): string {
-    const [localPart = '', domainPart = ''] = email.split('@');
-
-    const visiblePart = localPart.slice(0, 2);
-    const hiddenLength = Math.max(localPart.length - visiblePart.length, 1);
-
-    return `${visiblePart}${'*'.repeat(hiddenLength)}@${domainPart}`;
   }
 
   private stringifyProviderError(error: unknown): string {

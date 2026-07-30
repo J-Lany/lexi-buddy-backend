@@ -1,8 +1,10 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 
+import { HttpStatus } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuthService } from './auth.service';
 import { MailService } from 'common/modules/mail/mail.service';
+import { AppException } from 'common/errors';
 import { UserRepository } from 'repositories/user.repository';
 import { RoleRepository } from 'repositories/role.repository';
 import { ContactTypeRepository } from 'repositories/contact-type.repository';
@@ -17,6 +19,25 @@ function prismaUniqueConstraintError(target: string[] | string | undefined) {
     clientVersion: '5.15.0',
     meta: target === undefined ? {} : { target },
   });
+}
+
+/** Awaits `promise`, asserting it rejects with an AppException(status, code). */
+async function expectAppException(
+  promise: Promise<unknown>,
+  status: HttpStatus,
+  code: string,
+) {
+  expect.hasAssertions();
+  try {
+    await promise;
+    throw new Error('expected promise to reject with an AppException');
+  } catch (e) {
+    expect(e).toBeInstanceOf(AppException);
+    const ex = e as AppException;
+    expect(ex.getStatus()).toBe(status);
+    expect(ex.code).toBe(code);
+    return ex;
+  }
 }
 
 jest.mock('argon2', () => ({
@@ -81,6 +102,13 @@ describe('AuthService (unit, manual DI)', () => {
       findByTelegram: jest.fn(),
     } as any;
 
+    // AuthService's constructor eagerly computes a dummy password hash
+    // (login()'s timing-safety fallback for a nonexistent user). Give it a
+    // safe resolvable default so that call never crashes in describe blocks
+    // that don't care about it; individual login() tests can still layer
+    // their own mockResolvedValueOnce on top for argon.verify.
+    (argon.hash as jest.Mock).mockResolvedValue('dummy-hash-value');
+
     service = new AuthService(
       mailService,
       jwtService,
@@ -101,12 +129,14 @@ describe('AuthService (unit, manual DI)', () => {
   // REGISTER (EMAIL)
   // -------------------------------------------------------------------
   describe('register', () => {
-    it('should throw if email already exists', async () => {
+    it('should throw AppException(409, AUTH_EMAIL_ALREADY_EXISTS) if email already exists', async () => {
       userContactRepo.findByEmail.mockResolvedValueOnce({ id: 1 } as any);
 
-      await expect(
+      await expectAppException(
         service.register({ email: 'test@mail.com', password: '1234' } as any),
-      ).rejects.toThrow('Email already exist');
+        HttpStatus.CONFLICT,
+        'AUTH_EMAIL_ALREADY_EXISTS',
+      );
 
       expect(roleRepo.findGlobalRole).not.toHaveBeenCalled();
       expect(contactTypeRepo.findByName).not.toHaveBeenCalled();
@@ -466,11 +496,13 @@ describe('AuthService (unit, manual DI)', () => {
   // ACTIVATE
   // -------------------------------------------------------------------
   describe('activate', () => {
-    it('should throw if token is invalid', async () => {
+    it('should throw AppException(400, AUTH_INVALID_TOKEN) if token is invalid', async () => {
       userRepo.findByActivationToken.mockResolvedValueOnce(null as any);
 
-      await expect(service.activate('invalid')).rejects.toThrow(
-        'Invalid token',
+      await expectAppException(
+        service.activate('invalid'),
+        HttpStatus.BAD_REQUEST,
+        'AUTH_INVALID_TOKEN',
       );
 
       expect(userRepo.updateUserVerification).not.toHaveBeenCalled();
@@ -491,15 +523,17 @@ describe('AuthService (unit, manual DI)', () => {
       expect(userRepo.deleteUser).not.toHaveBeenCalled();
     });
 
-    it('should delete user and throw if token is expired and user not verified', async () => {
+    it('should delete user and throw AppException(400, AUTH_TOKEN_EXPIRED) if token is expired and user not verified', async () => {
       userRepo.findByActivationToken.mockResolvedValueOnce({
         id: 1,
         verified: false,
         activationExpires: new Date(Date.now() - 1000),
       } as any);
 
-      await expect(service.activate('expired-token')).rejects.toThrow(
-        'Activation token expired',
+      await expectAppException(
+        service.activate('expired-token'),
+        HttpStatus.BAD_REQUEST,
+        'AUTH_TOKEN_EXPIRED',
       );
 
       expect(userRepo.deleteUser).toHaveBeenCalledWith(1);
@@ -527,36 +561,208 @@ describe('AuthService (unit, manual DI)', () => {
   describe('login', () => {
     const dto = { email: 'test@mail.com', password: 'pass123' };
 
-    it('should throw if user not found', async () => {
-      userRepo.findByEmail.mockResolvedValueOnce(null as any);
+    // The three branches below must be fully indistinguishable to the
+    // client: same status, same code, same body shape. Only the internal
+    // debug log line (not asserted here) differs.
 
-      await expect(service.login(dto as any)).rejects.toThrow(
-        'User by this email is not found',
+    it('rejects with AppException(401, AUTH_INVALID_CREDENTIALS) when the user is not found', async () => {
+      userRepo.findByEmail.mockResolvedValueOnce(null as any);
+      (argon.verify as jest.Mock).mockResolvedValueOnce(false);
+
+      await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
       );
     });
 
-    it('should throw if email not verified', async () => {
+    it('rejects with the identical AppException when the user has no password hash (e.g. Telegram-only account)', async () => {
+      userRepo.findByEmail.mockResolvedValueOnce({
+        passwordHash: null,
+        verified: true,
+      } as any);
+      (argon.verify as jest.Mock).mockResolvedValueOnce(false);
+
+      await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
+    });
+
+    it('rejects with the identical AppException when the email is not verified, even with the correct password', async () => {
       userRepo.findByEmail.mockResolvedValueOnce({
         passwordHash: 'hash',
         verified: false,
       } as any);
+      (argon.verify as jest.Mock).mockResolvedValueOnce(true);
 
-      await expect(service.login(dto as any)).rejects.toThrow(
-        'Email not verified. Check your mailbox',
+      await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
       );
     });
 
-    it('should throw if password invalid', async () => {
+    it('rejects with the identical AppException when the password is wrong', async () => {
       userRepo.findByEmail.mockResolvedValueOnce({
         passwordHash: 'hash',
         verified: true,
       } as any);
-
       (argon.verify as jest.Mock).mockResolvedValueOnce(false);
 
-      await expect(service.login(dto as any)).rejects.toThrow(
-        'Invalid password',
+      await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
       );
+    });
+
+    it('produces byte-identical status and code across all three rejection branches', async () => {
+      userRepo.findByEmail.mockResolvedValueOnce(null as any);
+      (argon.verify as jest.Mock).mockResolvedValueOnce(false);
+      const userNotFound = await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
+
+      userRepo.findByEmail.mockResolvedValueOnce({
+        passwordHash: 'hash',
+        verified: true,
+      } as any);
+      (argon.verify as jest.Mock).mockResolvedValueOnce(false);
+      const wrongPassword = await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
+
+      userRepo.findByEmail.mockResolvedValueOnce({
+        passwordHash: 'hash',
+        verified: false,
+      } as any);
+      (argon.verify as jest.Mock).mockResolvedValueOnce(true);
+      const unverified = await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
+
+      expect(
+        new Set([userNotFound.code, wrongPassword.code, unverified.code]).size,
+      ).toBe(1);
+      expect(
+        new Set([
+          userNotFound.getStatus(),
+          wrongPassword.getStatus(),
+          unverified.getStatus(),
+        ]).size,
+      ).toBe(1);
+    });
+
+    // ---------------------------------------------------------------
+    // Timing / enumeration safety
+    // ---------------------------------------------------------------
+
+    it('calls argon.verify exactly once in the user-not-found branch, against the dummy hash rather than returning early', async () => {
+      userRepo.findByEmail.mockResolvedValueOnce(null as any);
+      (argon.verify as jest.Mock).mockResolvedValueOnce(false);
+
+      await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
+
+      expect(argon.verify).toHaveBeenCalledTimes(1);
+      expect(argon.verify).toHaveBeenCalledWith(
+        'dummy-hash-value',
+        dto.password,
+      );
+    });
+
+    it('calls argon.verify exactly once in the no-password-hash branch, against the dummy hash', async () => {
+      userRepo.findByEmail.mockResolvedValueOnce({
+        passwordHash: null,
+        verified: true,
+      } as any);
+      (argon.verify as jest.Mock).mockResolvedValueOnce(false);
+
+      await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
+
+      expect(argon.verify).toHaveBeenCalledTimes(1);
+      expect(argon.verify).toHaveBeenCalledWith(
+        'dummy-hash-value',
+        dto.password,
+      );
+    });
+
+    it('calls argon.verify exactly once in the unverified-email branch, against the real hash — proving `verified` is checked after verify, not before', async () => {
+      userRepo.findByEmail.mockResolvedValueOnce({
+        passwordHash: 'real-hash',
+        verified: false,
+      } as any);
+      (argon.verify as jest.Mock).mockResolvedValueOnce(true);
+
+      await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
+
+      expect(argon.verify).toHaveBeenCalledTimes(1);
+      expect(argon.verify).toHaveBeenCalledWith('real-hash', dto.password);
+    });
+
+    it('calls argon.verify exactly once in the wrong-password branch, against the real hash', async () => {
+      userRepo.findByEmail.mockResolvedValueOnce({
+        passwordHash: 'real-hash',
+        verified: true,
+      } as any);
+      (argon.verify as jest.Mock).mockResolvedValueOnce(false);
+
+      await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
+
+      expect(argon.verify).toHaveBeenCalledTimes(1);
+      expect(argon.verify).toHaveBeenCalledWith('real-hash', dto.password);
+    });
+
+    it('computes the dummy hash only once per service instance, not once per login request', async () => {
+      // The constructor already consumed one argon.hash call before this
+      // test body runs — that's the one-time dummy-hash computation itself.
+      expect(argon.hash).toHaveBeenCalledTimes(1);
+
+      userRepo.findByEmail.mockResolvedValue(null as any);
+      (argon.verify as jest.Mock).mockResolvedValue(false);
+
+      await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
+      await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
+      await expectAppException(
+        service.login(dto as any),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
+
+      // Still exactly one call: three more login attempts did not compute a
+      // new dummy hash.
+      expect(argon.hash).toHaveBeenCalledTimes(1);
     });
 
     it('should return tokens and update refresh token hash', async () => {
@@ -617,24 +823,29 @@ describe('AuthService (unit, manual DI)', () => {
   // REFRESH
   // -------------------------------------------------------------------
   describe('refresh', () => {
-    it('should throw UnauthorizedException if token verification fails', async () => {
+    it('should throw AppException(401, AUTH_SESSION_EXPIRED) if token verification fails', async () => {
       jwtService.verifyAsync.mockRejectedValueOnce(new Error('jwt expired'));
 
-      await expect(service.refresh('bad-token')).rejects.toThrow(
-        'Invalid or expired refresh token',
+      const ex = await expectAppException(
+        service.refresh('bad-token'),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_SESSION_EXPIRED',
       );
+      expect(ex.internalReason).toBe('jwt expired');
     });
 
-    it('should throw UnauthorizedException if user not found', async () => {
+    it('should throw AppException(401, AUTH_SESSION_EXPIRED) if user not found', async () => {
       jwtService.verifyAsync.mockResolvedValueOnce({ sub: 99 });
       userRepo.findById.mockResolvedValueOnce(null as any);
 
-      await expect(service.refresh('token')).rejects.toThrow(
-        'Invalid or expired refresh token',
+      await expectAppException(
+        service.refresh('token'),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_SESSION_EXPIRED',
       );
     });
 
-    it('should throw UnauthorizedException if refresh hash does not match', async () => {
+    it('should throw AppException(401, AUTH_SESSION_EXPIRED) if refresh hash does not match', async () => {
       jwtService.verifyAsync.mockResolvedValueOnce({ sub: 1 });
       userRepo.findById.mockResolvedValueOnce({
         id: 1,
@@ -643,8 +854,10 @@ describe('AuthService (unit, manual DI)', () => {
       } as any);
       (argon.verify as jest.Mock).mockResolvedValueOnce(false);
 
-      await expect(service.refresh('token')).rejects.toThrow(
-        'Invalid or expired refresh token',
+      await expectAppException(
+        service.refresh('token'),
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_SESSION_EXPIRED',
       );
     });
 
@@ -680,13 +893,15 @@ describe('AuthService (unit, manual DI)', () => {
   describe('requestPasswordChange', () => {
     const dto = { password: 'NewPass1!', confirmPassword: 'NewPass1!' };
 
-    it('should throw if passwords do not match', async () => {
-      await expect(
+    it('should throw AppException(400, AUTH_PASSWORDS_DO_NOT_MATCH) if passwords do not match', async () => {
+      await expectAppException(
         service.requestPasswordChange(1, {
           password: 'aaa',
           confirmPassword: 'bbb',
         } as any),
-      ).rejects.toThrow('Passwords do not match');
+        HttpStatus.BAD_REQUEST,
+        'AUTH_PASSWORDS_DO_NOT_MATCH',
+      );
 
       expect(userRepo.findByIdWithContacts).not.toHaveBeenCalled();
     });
@@ -739,24 +954,28 @@ describe('AuthService (unit, manual DI)', () => {
   // CONFIRM PASSWORD CHANGE
   // -------------------------------------------------------------------
   describe('confirmPasswordChange', () => {
-    it('should throw if token not found', async () => {
+    it('should throw AppException(400, AUTH_INVALID_TOKEN) if token not found', async () => {
       passwordChangeRepo.findByToken.mockResolvedValueOnce(null as any);
 
-      await expect(service.confirmPasswordChange('bad-token')).rejects.toThrow(
-        'Invalid or expired token',
+      await expectAppException(
+        service.confirmPasswordChange('bad-token'),
+        HttpStatus.BAD_REQUEST,
+        'AUTH_INVALID_TOKEN',
       );
     });
 
-    it('should throw and delete request if token is expired', async () => {
+    it('should throw AppException(400, AUTH_TOKEN_EXPIRED) and delete request if token is expired', async () => {
       passwordChangeRepo.findByToken.mockResolvedValueOnce({
         userId: 1,
         passwordHash: 'hash',
         expiresAt: new Date(Date.now() - 1000),
       } as any);
 
-      await expect(
+      await expectAppException(
         service.confirmPasswordChange('expired-token'),
-      ).rejects.toThrow('Token has expired');
+        HttpStatus.BAD_REQUEST,
+        'AUTH_TOKEN_EXPIRED',
+      );
       expect(passwordChangeRepo.deleteByUserId).toHaveBeenCalledWith(1);
       expect(userRepo.updatePasswordHash).not.toHaveBeenCalled();
     });

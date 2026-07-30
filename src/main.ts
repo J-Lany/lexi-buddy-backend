@@ -10,6 +10,7 @@ import { AppRequest } from 'common/types/http';
 import { ActivityService } from 'common/modules/activity/activity.service';
 import { LastVisitInterceptor } from 'auth/interceptors/last-visit.interceptor';
 import { AllExceptionsFilter } from 'common/filters/all-exceptions.filter';
+import { validationErrorsToAppException } from 'common/errors';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -67,6 +68,7 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      exceptionFactory: validationErrorsToAppException,
     }),
   );
 

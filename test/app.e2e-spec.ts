@@ -11,6 +11,7 @@ import { TelegramNotificationsService } from '../src/common/modules/notification
 import { StorageService } from '../src/common/modules/storage/storage.service';
 import { AiService } from '../src/ai/ai.service';
 import { AllExceptionsFilter } from '../src/common/filters/all-exceptions.filter';
+import { validationErrorsToAppException } from '../src/common/errors';
 
 // Minimal Prisma mock — individual tests fill in model methods as needed
 const createPrismaMock = () => ({
@@ -73,6 +74,7 @@ describe('App (e2e)', () => {
         whitelist: true,
         forbidNonWhitelisted: true,
         transform: true,
+        exceptionFactory: validationErrorsToAppException,
       }),
     );
     app.useGlobalFilters(new AllExceptionsFilter());
@@ -103,37 +105,55 @@ describe('App (e2e)', () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   describe('POST /auth/register — DTO validation', () => {
-    it('should return 400 when email is invalid', async () => {
+    const validRest = { consentAccepted: true, consentVersion: 1 };
+
+    it('should return 400 VALIDATION_FAILED with a stable INVALID_EMAIL field code when email is invalid', async () => {
       const res = await request(app.getHttpServer())
         .post('/auth/register')
-        .send({ email: 'not-an-email', password: 'Password1!' })
+        .send({ email: 'not-an-email', password: 'Password1!', ...validRest })
         .expect(400);
 
-      expect(res.body.message).toContain('email must be an email');
+      expect(res.body).toMatchObject({
+        statusCode: 400,
+        code: 'VALIDATION_FAILED',
+        details: { fields: [{ field: 'email', code: 'INVALID_EMAIL' }] },
+      });
+      expect(res.body).not.toHaveProperty('message');
+      expect(JSON.stringify(res.body)).not.toContain('isEmail');
     });
 
-    it('should return 400 when password is too short (< 6 chars)', async () => {
+    it('should return 400 VALIDATION_FAILED with a stable VALUE_TOO_SHORT field code when password is too short (< 6 chars)', async () => {
       const res = await request(app.getHttpServer())
         .post('/auth/register')
-        .send({ email: 'valid@example.com', password: 'abc' })
+        .send({ email: 'valid@example.com', password: 'abc', ...validRest })
         .expect(400);
 
-      expect(res.body.message).toContain(
-        'password must be longer than or equal to 6 characters',
-      );
+      expect(res.body).toMatchObject({
+        statusCode: 400,
+        code: 'VALIDATION_FAILED',
+        details: { fields: [{ field: 'password', code: 'VALUE_TOO_SHORT' }] },
+      });
+      expect(res.body).not.toHaveProperty('message');
     });
 
-    it('should return 400 when extra unexpected fields are sent (forbidNonWhitelisted)', async () => {
+    it('should return 400 VALIDATION_FAILED with an UNKNOWN_FIELD code when extra unexpected fields are sent (forbidNonWhitelisted)', async () => {
       const res = await request(app.getHttpServer())
         .post('/auth/register')
         .send({
           email: 'valid@example.com',
           password: 'Password1!',
+          ...validRest,
           admin: true,
         })
         .expect(400);
 
-      expect(res.body.message).toContain('property admin should not exist');
+      expect(res.body).toMatchObject({
+        statusCode: 400,
+        code: 'VALIDATION_FAILED',
+        details: { fields: [{ field: 'admin', code: 'UNKNOWN_FIELD' }] },
+      });
+      expect(res.body).not.toHaveProperty('message');
+      expect(JSON.stringify(res.body)).not.toContain('should not exist');
     });
 
     it('should return 400 when body is empty', async () => {
@@ -217,12 +237,25 @@ describe('App (e2e)', () => {
       return req;
     }
 
-    it('should return 401 when the internal token header is missing', async () => {
-      await post(validTelegramBody).expect(401);
+    it('should return 401 AUTH_UNAUTHENTICATED when the internal token header is missing', async () => {
+      const res = await post(validTelegramBody).expect(401);
+      expect(res.body).toEqual(
+        expect.objectContaining({
+          statusCode: 401,
+          code: 'AUTH_UNAUTHENTICATED',
+        }),
+      );
+      expect(res.body).not.toHaveProperty('message');
     });
 
-    it('should return 401 when the internal token is wrong', async () => {
-      await post(validTelegramBody, 'wrong-token').expect(401);
+    it('should return 401 AUTH_UNAUTHENTICATED when the internal token is wrong', async () => {
+      const res = await post(validTelegramBody, 'wrong-token').expect(401);
+      expect(res.body).toEqual(
+        expect.objectContaining({
+          statusCode: 401,
+          code: 'AUTH_UNAUTHENTICATED',
+        }),
+      );
     });
 
     // The exhaustive telegramId/consentAccepted/consentVersion type-validation
@@ -271,8 +304,18 @@ describe('App (e2e)', () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   describe('Guards — unauthenticated access', () => {
-    it('GET /lessons should return 401 without JWT', async () => {
-      await request(app.getHttpServer()).get('/lessons').expect(401);
+    it('GET /lessons should return 401 AUTH_UNAUTHENTICATED without JWT, with no message field', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/lessons')
+        .expect(401);
+      expect(res.body).toEqual(
+        expect.objectContaining({
+          statusCode: 401,
+          code: 'AUTH_UNAUTHENTICATED',
+        }),
+      );
+      expect(res.body).not.toHaveProperty('message');
+      expect(res.body.requestId).toEqual(expect.any(String));
     });
 
     it('GET /students/my should return 401 without JWT', async () => {
@@ -301,16 +344,25 @@ describe('App (e2e)', () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   describe('POST /auth/login', () => {
-    it('should return 401 when user is not found', async () => {
+    const LOGIN_FAILURE_BODY = expect.objectContaining({
+      statusCode: 401,
+      code: 'AUTH_INVALID_CREDENTIALS',
+      requestId: expect.any(String),
+    });
+
+    it('should return 401 AUTH_INVALID_CREDENTIALS when user is not found, with no message field', async () => {
       prismaMock.user.findFirst.mockResolvedValueOnce(null);
 
-      await request(app.getHttpServer())
+      const res = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: 'nobody@example.com', password: 'Password1!' })
         .expect(401);
+
+      expect(res.body).toEqual(LOGIN_FAILURE_BODY);
+      expect(res.body).not.toHaveProperty('message');
     });
 
-    it('should return 401 when password is incorrect', async () => {
+    it('should return 401 AUTH_INVALID_CREDENTIALS when password is incorrect', async () => {
       prismaMock.user.findFirst.mockResolvedValueOnce({
         id: 1,
         roleId: 1,
@@ -319,23 +371,77 @@ describe('App (e2e)', () => {
         refreshTokenHash: null,
       });
 
-      await request(app.getHttpServer())
+      const res = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: 'user@example.com', password: 'wrong-password' })
         .expect(401);
+
+      expect(res.body).toEqual(LOGIN_FAILURE_BODY);
     });
 
-    it('should return 401 when email is not verified', async () => {
+    it('should return 401 AUTH_INVALID_CREDENTIALS when email is not verified — never a distinct AUTH_EMAIL_NOT_VERIFIED code', async () => {
       prismaMock.user.findFirst.mockResolvedValueOnce({
         id: 1,
         verified: false,
         passwordHash: await argon2.hash('Password1!'),
       });
 
-      await request(app.getHttpServer())
+      const res = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: 'user@example.com', password: 'Password1!' })
         .expect(401);
+
+      expect(res.body).toEqual(LOGIN_FAILURE_BODY);
+    });
+
+    it('produces byte-identical bodies (aside from requestId) across the three login failure branches', async () => {
+      prismaMock.user.findFirst.mockResolvedValueOnce(null);
+      const notFound = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'nobody@example.com', password: 'Password1!' })
+        .expect(401);
+
+      prismaMock.user.findFirst.mockResolvedValueOnce({
+        id: 1,
+        roleId: 1,
+        verified: true,
+        passwordHash: await argon2.hash('correct-password'),
+      });
+      const wrongPassword = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'user@example.com', password: 'wrong-password' })
+        .expect(401);
+
+      prismaMock.user.findFirst.mockResolvedValueOnce({
+        id: 1,
+        verified: false,
+        passwordHash: await argon2.hash('Password1!'),
+      });
+      const unverified = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'user@example.com', password: 'Password1!' })
+        .expect(401);
+
+      const strip = (body: Record<string, unknown>) => {
+        const rest = { ...body };
+        delete rest.requestId;
+        return rest;
+      };
+      expect(strip(notFound.body)).toEqual(strip(wrongPassword.body));
+      expect(strip(wrongPassword.body)).toEqual(strip(unverified.body));
+    });
+
+    it('echoes a client-supplied X-Request-Id back in both the response header and body.requestId', async () => {
+      prismaMock.user.findFirst.mockResolvedValueOnce(null);
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/login')
+        .set('X-Request-Id', 'e2e-fixed-request-id')
+        .send({ email: 'nobody@example.com', password: 'Password1!' })
+        .expect(401);
+
+      expect(res.headers['x-request-id']).toBe('e2e-fixed-request-id');
+      expect(res.body.requestId).toBe('e2e-fixed-request-id');
     });
 
     it('should return 200 and set auth cookies on valid credentials', async () => {
@@ -382,10 +488,10 @@ describe('App (e2e)', () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   describe('Error handling', () => {
-    it('500 response body should not contain stack trace', async () => {
+    it('500 response body is { statusCode, code: INTERNAL_ERROR, requestId } — no message, no stack, no internal reason', async () => {
       // userContact.findFirst throws unexpectedly (simulate DB crash during registration)
       prismaMock.userContact.findFirst.mockRejectedValueOnce(
-        new Error('Connection refused'),
+        new Error('Connection refused at host db.internal:5432'),
       );
 
       const res = await request(app.getHttpServer())
@@ -398,9 +504,36 @@ describe('App (e2e)', () => {
         })
         .expect(500);
 
+      expect(res.body).toEqual({
+        statusCode: 500,
+        code: 'INTERNAL_ERROR',
+        requestId: expect.any(String),
+      });
       expect(res.body).not.toHaveProperty('stack');
+      expect(res.body).not.toHaveProperty('message');
       expect(JSON.stringify(res.body)).not.toContain('at ');
-      expect(res.body.message).toBe('Internal server error');
+      expect(JSON.stringify(res.body)).not.toContain('Connection refused');
+      expect(JSON.stringify(res.body)).not.toContain('db.internal');
+    });
+
+    it('registration conflict returns 409 AUTH_EMAIL_ALREADY_EXISTS, not the raw Prisma/service message', async () => {
+      prismaMock.userContact.findFirst.mockResolvedValueOnce({ id: 1 } as any);
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          email: 'existing@example.com',
+          password: 'Password1!',
+          consentAccepted: true,
+          consentVersion: 1,
+        })
+        .expect(409);
+
+      expect(res.body).toEqual({
+        statusCode: 409,
+        code: 'AUTH_EMAIL_ALREADY_EXISTS',
+        requestId: expect.any(String),
+      });
     });
   });
 });

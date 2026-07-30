@@ -2,16 +2,16 @@ import {
   Body,
   Controller,
   Get,
+  HttpStatus,
   Patch,
   Post,
   Query,
   Res,
-  BadRequestException,
-  UnauthorizedException,
   UseGuards,
   Req,
   ParseIntPipe,
 } from '@nestjs/common';
+import { AppException } from 'common/errors';
 import {
   ApiBadRequestResponse,
   ApiCreatedResponse,
@@ -78,7 +78,9 @@ export class AuthController {
   @ApiOkResponse({ description: 'Account activated' })
   @ApiBadRequestResponse({ description: 'Missing or invalid token' })
   async activate(@Query('token') token: string) {
-    if (!token) throw new BadRequestException('Missing token');
+    if (!token) {
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
+    }
 
     return this.authService.activate(token);
   }
@@ -123,7 +125,7 @@ export class AuthController {
   ) {
     const refreshToken = req.cookies?.refresh_token;
     if (!refreshToken) {
-      throw new UnauthorizedException('Missing refresh token');
+      throw new AppException(HttpStatus.UNAUTHORIZED, 'AUTH_SESSION_EXPIRED');
     }
 
     const { accessToken, refreshToken: newRefreshToken } =
@@ -199,7 +201,9 @@ export class AuthController {
   @ApiOkResponse({ description: 'Password changed successfully' })
   @ApiBadRequestResponse({ description: 'Invalid or expired token' })
   confirmPasswordChange(@Query('token') token: string) {
-    if (!token) throw new BadRequestException('Missing token');
+    if (!token) {
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
+    }
     return this.authService.confirmPasswordChange(token);
   }
 
