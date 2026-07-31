@@ -115,6 +115,7 @@ model User {
   notifications              Notification[]
   studentAssignedAssignments StudentAssignedAssignment[]
   passwordChangeRequest      PasswordChangeRequest?
+  passwordResetRequest       PasswordResetRequest?
 
   @@index([roleId])
   @@index([lastVisit])
@@ -397,6 +398,18 @@ model PasswordChangeRequest {
   token        String   @unique
   expiresAt    DateTime
   createdAt    DateTime @default(now())
+}
+
+// Public "forgot password" flow. Unlike PasswordChangeRequest, no new password
+// is stored ahead of confirmation (the raw token is emailed, only its SHA-256
+// digest is stored) — see AuthService.forgotPassword/resetPassword.
+model PasswordResetRequest {
+  id        String   @id @default(cuid())
+  userId    Int      @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 }
 
 // ---------- ADDITIONALS ----------

@@ -31,6 +31,11 @@ const createPrismaMock = () => ({
   lesson: { findMany: jest.fn(), findUnique: jest.fn() },
   assignment: { findMany: jest.fn() },
   passwordChangeRequest: { findUnique: jest.fn() },
+  passwordResetRequest: {
+    upsert: jest.fn(),
+    findUnique: jest.fn(),
+    deleteMany: jest.fn(),
+  },
   $connect: jest.fn(),
   $disconnect: jest.fn(),
   $transaction: jest.fn(),
@@ -40,10 +45,20 @@ const createPrismaMock = () => ({
 describe('App (e2e)', () => {
   let app: INestApplication;
   let prismaMock: ReturnType<typeof createPrismaMock>;
+  let mailServiceMock: {
+    sendActivationMail: jest.Mock;
+    sendPasswordChangeMail: jest.Mock;
+    sendPasswordResetMail: jest.Mock;
+  };
 
   beforeAll(async () => {
     process.env.TELEGRAM_BOT_INTERNAL_TOKEN = 'test-internal-token';
     prismaMock = createPrismaMock();
+    mailServiceMock = {
+      sendActivationMail: jest.fn(),
+      sendPasswordChangeMail: jest.fn(),
+      sendPasswordResetMail: jest.fn(),
+    };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -51,10 +66,7 @@ describe('App (e2e)', () => {
       .overrideProvider(PrismaService)
       .useValue(prismaMock)
       .overrideProvider(MailService)
-      .useValue({
-        sendActivationMail: jest.fn(),
-        sendPasswordChangeMail: jest.fn(),
-      })
+      .useValue(mailServiceMock)
       .overrideProvider(TelegramNotificationsService)
       .useValue({
         sendLessonAssigned: jest.fn(),
@@ -534,6 +546,328 @@ describe('App (e2e)', () => {
         code: 'AUTH_EMAIL_ALREADY_EXISTS',
         requestId: expect.any(String),
       });
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Forgot / reset password (public flow)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('POST /auth/forgot-password', () => {
+    const NEUTRAL_BODY = expect.objectContaining({ ok: true });
+
+    it('returns 202 { ok: true } and sends the reset email for an existing, eligible user', async () => {
+      prismaMock.user.findFirst.mockResolvedValueOnce({
+        id: 1,
+        roleId: 1,
+        verified: true,
+        passwordHash: 'hashed',
+      });
+      prismaMock.passwordResetRequest.upsert.mockResolvedValueOnce({} as any);
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/forgot-password')
+        .send({ email: 'user@example.com' })
+        .expect(202);
+
+      expect(res.body).toEqual(NEUTRAL_BODY);
+      expect(mailServiceMock.sendPasswordResetMail).toHaveBeenCalledTimes(1);
+    });
+
+    it('produces a byte-identical 202 body whether the email exists or not, and never sends mail for a nonexistent account', async () => {
+      prismaMock.user.findFirst.mockResolvedValueOnce({
+        id: 1,
+        roleId: 1,
+        verified: true,
+        passwordHash: 'hashed',
+      });
+      prismaMock.passwordResetRequest.upsert.mockResolvedValueOnce({} as any);
+      const existing = await request(app.getHttpServer())
+        .post('/auth/forgot-password')
+        .send({ email: 'user@example.com' })
+        .expect(202);
+
+      prismaMock.user.findFirst.mockResolvedValueOnce(null);
+      const nonexistent = await request(app.getHttpServer())
+        .post('/auth/forgot-password')
+        .send({ email: 'nobody@example.com' })
+        .expect(202);
+
+      const strip = (body: Record<string, unknown>) => {
+        const rest = { ...body };
+        delete rest.requestId;
+        return rest;
+      };
+      expect(strip(existing.body)).toEqual(strip(nonexistent.body));
+      expect(mailServiceMock.sendPasswordResetMail).toHaveBeenCalledTimes(1); // only for the existing account
+    });
+
+    it('returns 202 { ok: true } even when the mail provider fails, without leaking the provider error', async () => {
+      prismaMock.user.findFirst.mockResolvedValueOnce({
+        id: 1,
+        roleId: 1,
+        verified: true,
+        passwordHash: 'hashed',
+      });
+      prismaMock.passwordResetRequest.upsert.mockResolvedValueOnce({} as any);
+      mailServiceMock.sendPasswordResetMail.mockRejectedValueOnce(
+        new Error('Resend API unreachable'),
+      );
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/forgot-password')
+        .send({ email: 'user@example.com' })
+        .expect(202);
+
+      expect(res.body).toEqual(NEUTRAL_BODY);
+      expect(JSON.stringify(res.body)).not.toContain('Resend');
+    });
+
+    it('returns 400 VALIDATION_FAILED with an UNKNOWN_FIELD code when a password field is sent (forbidNonWhitelisted)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/auth/forgot-password')
+        .send({ email: 'user@example.com', password: 'sneaky-new-password' })
+        .expect(400);
+
+      expect(res.body).toMatchObject({
+        statusCode: 400,
+        code: 'VALIDATION_FAILED',
+        details: { fields: [{ field: 'password', code: 'UNKNOWN_FIELD' }] },
+      });
+      expect(prismaMock.user.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('is rate limited: repeated requests eventually return 429 RATE_LIMITED, not a raw throttler message', async () => {
+      prismaMock.user.findFirst.mockResolvedValue(null);
+
+      let sawRateLimited = false;
+      for (let i = 0; i < 10 && !sawRateLimited; i++) {
+        const res = await request(app.getHttpServer())
+          .post('/auth/forgot-password')
+          .send({ email: `probe-${i}@example.com` });
+
+        if (res.status === 429) {
+          sawRateLimited = true;
+          expect(res.body).toEqual({
+            statusCode: 429,
+            code: 'RATE_LIMITED',
+            requestId: expect.any(String),
+          });
+          expect(res.body).not.toHaveProperty('message');
+        } else {
+          expect(res.status).toBe(202);
+        }
+      }
+
+      expect(sawRateLimited).toBe(true);
+    });
+  });
+
+  describe('POST /auth/reset-password', () => {
+    it('returns 400 AUTH_PASSWORDS_DO_NOT_MATCH when password and confirmPassword differ', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/auth/reset-password')
+        .send({
+          token: 'some-token',
+          password: 'Password1!',
+          confirmPassword: 'Different1!',
+        })
+        .expect(400);
+
+      expect(res.body).toEqual({
+        statusCode: 400,
+        code: 'AUTH_PASSWORDS_DO_NOT_MATCH',
+        requestId: expect.any(String),
+      });
+      expect(prismaMock.passwordResetRequest.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 AUTH_INVALID_TOKEN when no request matches the token', async () => {
+      prismaMock.passwordResetRequest.findUnique.mockResolvedValueOnce(null);
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/reset-password')
+        .send({
+          token: 'unknown-token',
+          password: 'Password1!',
+          confirmPassword: 'Password1!',
+        })
+        .expect(400);
+
+      expect(res.body).toEqual({
+        statusCode: 400,
+        code: 'AUTH_INVALID_TOKEN',
+        requestId: expect.any(String),
+      });
+    });
+
+    it('returns 400 AUTH_TOKEN_EXPIRED when the token has expired, and never opens a transaction to change the password', async () => {
+      prismaMock.passwordResetRequest.findUnique.mockResolvedValueOnce({
+        id: 'req-1',
+        userId: 1,
+        tokenHash: 'irrelevant-in-this-mock',
+        expiresAt: new Date(Date.now() - 1000),
+      } as any);
+      prismaMock.passwordResetRequest.deleteMany.mockResolvedValueOnce({
+        count: 1,
+      } as any);
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/reset-password')
+        .send({
+          token: 'expired-token',
+          password: 'Password1!',
+          confirmPassword: 'Password1!',
+        })
+        .expect(400);
+
+      expect(res.body).toEqual({
+        statusCode: 400,
+        code: 'AUTH_TOKEN_EXPIRED',
+        requestId: expect.any(String),
+      });
+      // The password is only ever written inside consumeAndApplyPassword's
+      // transaction — an expired token must never reach that point.
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('changes the password on a valid, unexpired token', async () => {
+      prismaMock.passwordResetRequest.findUnique.mockResolvedValueOnce({
+        id: 'req-1',
+        userId: 1,
+        tokenHash: 'irrelevant-in-this-mock',
+        expiresAt: new Date(Date.now() + 60_000),
+      } as any);
+      prismaMock.$transaction.mockImplementationOnce(
+        (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({
+            passwordResetRequest: {
+              deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+            },
+            user: { update: jest.fn().mockResolvedValue({ id: 1 }) },
+          }),
+      );
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/reset-password')
+        .send({
+          token: 'valid-token',
+          password: 'NewPassword1!',
+          confirmPassword: 'NewPassword1!',
+        })
+        .expect(200);
+
+      expect(res.body).toEqual({ ok: true });
+    });
+
+    it('an old refresh token is rejected with 401 AUTH_SESSION_EXPIRED after the password is reset', async () => {
+      // A stateful in-memory user record, shared by findFirst/findUnique/update,
+      // so that reset-password's write is actually visible to the later
+      // /auth/refresh call — this is what makes the test a genuine chain
+      // (login sets refreshTokenHash -> reset nulls it -> refresh rejects it)
+      // rather than two independently-mocked facts stitched together.
+      const userRecord: {
+        id: number;
+        roleId: number;
+        verified: boolean;
+        passwordHash: string;
+        refreshTokenHash: string | null;
+      } = {
+        id: 1,
+        roleId: 1,
+        verified: true,
+        passwordHash: await argon2.hash('OldPassword1!'),
+        refreshTokenHash: null,
+      };
+
+      prismaMock.user.findFirst.mockImplementation(() =>
+        Promise.resolve({ ...userRecord }),
+      );
+      prismaMock.user.findUnique.mockImplementation(() =>
+        Promise.resolve({ ...userRecord }),
+      );
+      prismaMock.user.update.mockImplementation(({ data }: any) => {
+        Object.assign(userRecord, data);
+        return Promise.resolve({ ...userRecord });
+      });
+
+      try {
+        // 1. Log in — this issues a refresh token and persists its hash.
+        const loginRes = await request(app.getHttpServer())
+          .post('/auth/login')
+          .send({ email: 'user@example.com', password: 'OldPassword1!' })
+          .expect(201);
+
+        const setCookie: unknown = loginRes.headers['set-cookie'];
+        const cookies: string[] = Array.isArray(setCookie)
+          ? (setCookie as string[])
+          : typeof setCookie === 'string'
+            ? [setCookie]
+            : [];
+        const oldRefreshCookie = cookies.find((c) =>
+          c.startsWith('refresh_token='),
+        );
+        expect(oldRefreshCookie).toBeDefined();
+        expect(userRecord.refreshTokenHash).toEqual(expect.any(String));
+
+        // 2. Reset the password for this same user via a real conditional-consume
+        //    transaction (mirrors consumeAndApplyPassword: id/tokenHash/expiresAt
+        //    scoped delete + a single user.update writing passwordHash and
+        //    refreshTokenHash: null into the same shared userRecord).
+        prismaMock.passwordResetRequest.findUnique.mockResolvedValueOnce({
+          id: 'req-1',
+          userId: 1,
+          tokenHash: 'irrelevant-in-this-mock',
+          expiresAt: new Date(Date.now() + 60_000),
+        } as any);
+        prismaMock.$transaction.mockImplementationOnce(
+          (fn: (tx: unknown) => Promise<unknown>) =>
+            fn({
+              passwordResetRequest: {
+                deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+              },
+              user: {
+                update: ({ data }: any) => {
+                  Object.assign(userRecord, data);
+                  return Promise.resolve({ ...userRecord });
+                },
+              },
+            }),
+        );
+
+        await request(app.getHttpServer())
+          .post('/auth/reset-password')
+          .send({
+            token: 'valid-token',
+            password: 'NewPassword1!',
+            confirmPassword: 'NewPassword1!',
+          })
+          .expect(200);
+
+        // Sanity check: the reset really did null out refreshTokenHash on the
+        // shared record before we assert anything about /auth/refresh.
+        expect(userRecord.refreshTokenHash).toBeNull();
+
+        // 3. The refresh cookie issued *before* the reset must now be rejected.
+        const refreshRes = await request(app.getHttpServer())
+          .post('/auth/refresh')
+          .set('Cookie', oldRefreshCookie!)
+          .expect(401);
+
+        expect(refreshRes.body).toMatchObject({
+          statusCode: 401,
+          code: 'AUTH_SESSION_EXPIRED',
+        });
+      } finally {
+        // This test intentionally installs stateful, cross-call implementations
+        // on shared mocks (unlike every other test here, which uses
+        // mockResolvedValueOnce). Reset them so later tests get the default
+        // createPrismaMock() behavior — jest.clearAllMocks() in beforeEach
+        // clears call history but does NOT remove custom implementations.
+        prismaMock.user.findFirst.mockReset();
+        prismaMock.user.findUnique.mockReset();
+        prismaMock.user.update.mockReset();
+      }
     });
   });
 });

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 
-import { HttpStatus } from '@nestjs/common';
+import { HttpStatus, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuthService } from './auth.service';
 import { MailService } from 'common/modules/mail/mail.service';
@@ -10,6 +10,7 @@ import { RoleRepository } from 'repositories/role.repository';
 import { ContactTypeRepository } from 'repositories/contact-type.repository';
 import { UserContactRepository } from 'repositories/user-contact.repository';
 import { PasswordChangeRequestRepository } from 'repositories/password-change-request.repository';
+import { PasswordResetRequestRepository } from 'repositories/password-reset-request.repository';
 import { JwtService } from '@nestjs/jwt';
 import * as argon from 'argon2';
 
@@ -55,12 +56,14 @@ describe('AuthService (unit, manual DI)', () => {
   let contactTypeRepo: jest.Mocked<ContactTypeRepository>;
   let userContactRepo: jest.Mocked<UserContactRepository>;
   let passwordChangeRepo: jest.Mocked<PasswordChangeRequestRepository>;
+  let passwordResetRepo: jest.Mocked<PasswordResetRequestRepository>;
 
   beforeEach(() => {
     process.env.JWT_SECRET = 'test-secret';
     mailService = {
       sendActivationMail: jest.fn(),
       sendPasswordChangeMail: jest.fn(),
+      sendPasswordResetMail: jest.fn(),
     } as any;
 
     jwtService = {
@@ -86,6 +89,13 @@ describe('AuthService (unit, manual DI)', () => {
       upsert: jest.fn(),
       findByToken: jest.fn(),
       deleteByUserId: jest.fn(),
+    } as any;
+
+    passwordResetRepo = {
+      upsertForUser: jest.fn(),
+      findByTokenHash: jest.fn(),
+      deleteExpired: jest.fn(),
+      consumeAndApplyPassword: jest.fn(),
     } as any;
 
     roleRepo = {
@@ -117,6 +127,7 @@ describe('AuthService (unit, manual DI)', () => {
       userContactRepo,
       roleRepo,
       passwordChangeRepo,
+      passwordResetRepo,
       undefined,
     );
   });
@@ -992,6 +1003,259 @@ describe('AuthService (unit, manual DI)', () => {
       expect(result).toEqual({ message: 'Password changed successfully' });
       expect(userRepo.updatePasswordHash).toHaveBeenCalledWith(1, 'new-hash');
       expect(passwordChangeRepo.deleteByUserId).toHaveBeenCalledWith(1);
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // FORGOT PASSWORD (public flow)
+  // -------------------------------------------------------------------
+  describe('forgotPassword', () => {
+    const dto = { email: 'user@example.com' };
+
+    it('should return { ok: true }, upsert a request and send an email for an eligible user', async () => {
+      userRepo.findByEmail.mockResolvedValueOnce({
+        id: 1,
+        passwordHash: 'existing-hash',
+        verified: true,
+      } as any);
+      passwordResetRepo.upsertForUser.mockResolvedValueOnce(undefined as any);
+      (mailService.sendPasswordResetMail as jest.Mock).mockResolvedValueOnce(
+        undefined,
+      );
+
+      const result = await service.forgotPassword(dto as any, 'req-1');
+
+      expect(result).toEqual({ ok: true });
+      expect(passwordResetRepo.upsertForUser).toHaveBeenCalledTimes(1);
+      const call = (passwordResetRepo.upsertForUser as jest.Mock).mock
+        .calls[0][0];
+      expect(call.userId).toBe(1);
+      expect(call.tokenHash).toMatch(/^[0-9a-f]{64}$/); // sha256 hex digest
+      expect(call).not.toHaveProperty('passwordHash');
+      expect(call).not.toHaveProperty('token'); // only the digest is ever passed to the repo
+      expect(mailService.sendPasswordResetMail).toHaveBeenCalledWith(
+        'user@example.com',
+        expect.any(String),
+      );
+    });
+
+    it('should return { ok: true } without sending an email for a nonexistent email', async () => {
+      userRepo.findByEmail.mockResolvedValueOnce(null as any);
+
+      const result = await service.forgotPassword(dto as any, 'req-2');
+
+      expect(result).toEqual({ ok: true });
+      expect(passwordResetRepo.upsertForUser).not.toHaveBeenCalled();
+      expect(mailService.sendPasswordResetMail).not.toHaveBeenCalled();
+    });
+
+    it('should return { ok: true } without sending an email for a Telegram-only account (no passwordHash)', async () => {
+      userRepo.findByEmail.mockResolvedValueOnce({
+        id: 1,
+        passwordHash: null,
+        verified: true,
+      } as any);
+
+      const result = await service.forgotPassword(dto as any, 'req-3');
+
+      expect(result).toEqual({ ok: true });
+      expect(passwordResetRepo.upsertForUser).not.toHaveBeenCalled();
+      expect(mailService.sendPasswordResetMail).not.toHaveBeenCalled();
+    });
+
+    it('should return { ok: true } without sending an email for an unverified account', async () => {
+      userRepo.findByEmail.mockResolvedValueOnce({
+        id: 1,
+        passwordHash: 'existing-hash',
+        verified: false,
+      } as any);
+
+      const result = await service.forgotPassword(dto as any, 'req-4');
+
+      expect(result).toEqual({ ok: true });
+      expect(passwordResetRepo.upsertForUser).not.toHaveBeenCalled();
+      expect(mailService.sendPasswordResetMail).not.toHaveBeenCalled();
+    });
+
+    it('should return { ok: true } even if the mail provider throws, and log the failure safely', async () => {
+      const errorSpy = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+
+      userRepo.findByEmail.mockResolvedValueOnce({
+        id: 1,
+        passwordHash: 'existing-hash',
+        verified: true,
+      } as any);
+      passwordResetRepo.upsertForUser.mockResolvedValueOnce(undefined as any);
+      (mailService.sendPasswordResetMail as jest.Mock).mockRejectedValueOnce(
+        new Error('provider down'),
+      );
+
+      const result = await service.forgotPassword(dto as any, 'req-5');
+
+      expect(result).toEqual({ ok: true });
+
+      // The failure must actually be logged (not silently dropped)...
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const [logMessage] = errorSpy.mock.calls[0];
+      // ...with the requestId and the underlying reason for debugging...
+      expect(logMessage).toContain('req-5');
+      expect(logMessage).toContain('provider down');
+      // ...but never the raw email address, only its masked form.
+      expect(logMessage).not.toContain(dto.email);
+      expect(logMessage).toContain('us**@example.com');
+
+      errorSpy.mockRestore();
+    });
+
+    it('should return { ok: true } even if upsertForUser throws (DB error), and log the failure safely', async () => {
+      const errorSpy = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+
+      userRepo.findByEmail.mockResolvedValueOnce({
+        id: 1,
+        passwordHash: 'existing-hash',
+        verified: true,
+      } as any);
+      passwordResetRepo.upsertForUser.mockRejectedValueOnce(
+        new Error('db down'),
+      );
+
+      const result = await service.forgotPassword(dto as any, 'req-6');
+
+      expect(result).toEqual({ ok: true });
+      expect(mailService.sendPasswordResetMail).not.toHaveBeenCalled();
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const [logMessage] = errorSpy.mock.calls[0];
+      expect(logMessage).toContain('req-6');
+      expect(logMessage).toContain('db down');
+      expect(logMessage).not.toContain(dto.email);
+      expect(logMessage).toContain('us**@example.com');
+
+      errorSpy.mockRestore();
+    });
+
+    it('replacing a request should invalidate the previous token (new upsert overwrites tokenHash)', async () => {
+      userRepo.findByEmail.mockResolvedValue({
+        id: 1,
+        passwordHash: 'existing-hash',
+        verified: true,
+      } as any);
+      passwordResetRepo.upsertForUser.mockResolvedValue(undefined as any);
+      (mailService.sendPasswordResetMail as jest.Mock).mockResolvedValue(
+        undefined,
+      );
+
+      await service.forgotPassword(dto as any, 'req-7a');
+      await service.forgotPassword(dto as any, 'req-7b');
+
+      expect(passwordResetRepo.upsertForUser).toHaveBeenCalledTimes(2);
+      const [firstCall, secondCall] = (
+        passwordResetRepo.upsertForUser as jest.Mock
+      ).mock.calls;
+      expect(firstCall[0].tokenHash).not.toBe(secondCall[0].tokenHash);
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // RESET PASSWORD (public flow)
+  // -------------------------------------------------------------------
+  describe('resetPassword', () => {
+    const dto = {
+      token: 'raw-token',
+      password: 'NewPass1!',
+      confirmPassword: 'NewPass1!',
+    };
+
+    it('should throw AppException(400, AUTH_PASSWORDS_DO_NOT_MATCH) if passwords do not match', async () => {
+      await expectAppException(
+        service.resetPassword({
+          token: 'raw-token',
+          password: 'aaa',
+          confirmPassword: 'bbb',
+        } as any),
+        HttpStatus.BAD_REQUEST,
+        'AUTH_PASSWORDS_DO_NOT_MATCH',
+      );
+
+      expect(passwordResetRepo.findByTokenHash).not.toHaveBeenCalled();
+    });
+
+    it('should throw AppException(400, AUTH_INVALID_TOKEN) if no request matches the token', async () => {
+      passwordResetRepo.findByTokenHash.mockResolvedValueOnce(null as any);
+
+      await expectAppException(
+        service.resetPassword(dto as any),
+        HttpStatus.BAD_REQUEST,
+        'AUTH_INVALID_TOKEN',
+      );
+      expect(passwordResetRepo.consumeAndApplyPassword).not.toHaveBeenCalled();
+    });
+
+    it('should throw AppException(400, AUTH_TOKEN_EXPIRED) and delete only that expired request if expired', async () => {
+      passwordResetRepo.findByTokenHash.mockResolvedValueOnce({
+        id: 'req-1',
+        userId: 1,
+        expiresAt: new Date(Date.now() - 1000),
+      } as any);
+
+      await expectAppException(
+        service.resetPassword(dto as any),
+        HttpStatus.BAD_REQUEST,
+        'AUTH_TOKEN_EXPIRED',
+      );
+
+      expect(passwordResetRepo.deleteExpired).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'req-1' }),
+      );
+      // Scoped by tokenHash — never by userId alone (would risk deleting a
+      // request that has since been replaced by a newer forgot-password call).
+      const deleteArgs = (passwordResetRepo.deleteExpired as jest.Mock).mock
+        .calls[0][0];
+      expect(deleteArgs).toHaveProperty('tokenHash');
+      expect(deleteArgs).not.toHaveProperty('userId');
+      expect(passwordResetRepo.consumeAndApplyPassword).not.toHaveBeenCalled();
+    });
+
+    it('should hash the password and atomically consume the request on success', async () => {
+      passwordResetRepo.findByTokenHash.mockResolvedValueOnce({
+        id: 'req-1',
+        userId: 1,
+        expiresAt: new Date(Date.now() + 60_000),
+      } as any);
+      (argon.hash as jest.Mock).mockResolvedValueOnce('new-pw-hash');
+      passwordResetRepo.consumeAndApplyPassword.mockResolvedValueOnce(true);
+
+      const result = await service.resetPassword(dto as any);
+
+      expect(result).toEqual({ ok: true });
+      expect(argon.hash).toHaveBeenCalledWith(dto.password);
+      expect(passwordResetRepo.consumeAndApplyPassword).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'req-1',
+          userId: 1,
+          passwordHash: 'new-pw-hash',
+        }),
+      );
+    });
+
+    it('should throw AppException(400, AUTH_INVALID_TOKEN) if consume loses the race (already used/replaced/expired)', async () => {
+      passwordResetRepo.findByTokenHash.mockResolvedValueOnce({
+        id: 'req-1',
+        userId: 1,
+        expiresAt: new Date(Date.now() + 60_000),
+      } as any);
+      (argon.hash as jest.Mock).mockResolvedValueOnce('new-pw-hash');
+      passwordResetRepo.consumeAndApplyPassword.mockResolvedValueOnce(false);
+
+      await expectAppException(
+        service.resetPassword(dto as any),
+        HttpStatus.BAD_REQUEST,
+        'AUTH_INVALID_TOKEN',
+      );
     });
   });
 

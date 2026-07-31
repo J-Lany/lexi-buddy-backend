@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   HttpStatus,
   Patch,
   Post,
@@ -37,6 +38,8 @@ import { JwtPayload } from './types/jwt-payload.type';
 import { getAuthCookieOptions } from 'auth/utils/auth-cookie.util';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RequestPasswordChangeDto } from './dto/request-password-change.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -205,6 +208,32 @@ export class AuthController {
       throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
     }
     return this.authService.confirmPasswordChange(token);
+  }
+
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Post('forgot-password')
+  @ApiOperation({
+    summary:
+      'Request a password reset email. Always responds identically, whether or not the email is registered — never confirm or deny account existence.',
+  })
+  @ApiOkResponse({ description: 'Accepted — response body never varies' })
+  forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
+    return this.authService.forgotPassword(dto, req.requestId);
+  }
+
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('reset-password')
+  @ApiOperation({
+    summary: 'Set a new password using the token from a forgot-password email',
+  })
+  @ApiOkResponse({ description: 'Password reset successfully' })
+  @ApiBadRequestResponse({
+    description: 'Invalid or expired token, or passwords do not match',
+  })
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
 
   @Post('logout')

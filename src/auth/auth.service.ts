@@ -8,11 +8,12 @@ import {
 } from '@nestjs/common';
 import * as argon from 'argon2';
 import { Prisma } from '@prisma/client';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes } from 'crypto';
 import { JwtService } from '@nestjs/jwt';
 import { MailService } from 'common/modules/mail/mail.service';
 import { AppException } from 'common/errors';
 import { maskEmail } from 'common/utils/mask-email';
+import { sha256Hex } from 'common/utils/hash-token';
 import {
   CURRENT_TEACHER_CONSENT_VERSION,
   CURRENT_TELEGRAM_CONSENT_VERSION,
@@ -23,11 +24,14 @@ import { ContactTypeRepository } from 'repositories/contact-type.repository';
 import { RoleRepository } from 'repositories/role.repository';
 import { UserContactRepository } from 'repositories/user-contact.repository';
 import { PasswordChangeRequestRepository } from 'repositories/password-change-request.repository';
+import { PasswordResetRequestRepository } from 'repositories/password-reset-request.repository';
 import { LoginrDto } from './dto/login.dto/login.dto';
 import { RegisterTelegramDto } from './dto/register-telegram.dto/register-telegram.dto';
 import { TelegramAvatarService } from 'common/modules/telegram/telegram-avatar.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RequestPasswordChangeDto } from './dto/request-password-change.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -48,6 +52,7 @@ export class AuthService {
     private userContactRepo: UserContactRepository,
     private roleRepo: RoleRepository,
     private passwordChangeRepo: PasswordChangeRequestRepository,
+    private passwordResetRepo: PasswordResetRequestRepository,
     private telegramAvatarService?: TelegramAvatarService,
   ) {
     const secret = process.env.JWT_SECRET;
@@ -420,6 +425,94 @@ export class AuthService {
     await this.passwordChangeRepo.deleteByUserId(request.userId);
 
     return { message: 'Password changed successfully' };
+  }
+
+  // -------------------------------------------------------------------
+  // FORGOT / RESET PASSWORD (public flow)
+  //
+  // Unlike requestPasswordChange/confirmPasswordChange above (authorized,
+  // password chosen up front, must never be exposed publicly), this flow
+  // never learns the new password until reset-password is called with a
+  // valid token. See PasswordResetRequestRepository for the atomic-consume
+  // mechanism that makes reset-password race-safe.
+  // -------------------------------------------------------------------
+
+  async forgotPassword(dto: ForgotPasswordDto, requestId?: string) {
+    try {
+      const user = await this.userRepo.findByEmail(dto.email);
+
+      // Only email/password accounts that completed email verification can
+      // use this flow — same gate as login(). Telegram-only accounts (no
+      // passwordHash) and unverified accounts are silently skipped: no email
+      // is sent, but the response below is identical either way.
+      if (user && user.passwordHash && user.verified) {
+        const token = randomBytes(32).toString('hex');
+        const tokenHash = sha256Hex(token);
+        const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+        await this.passwordResetRepo.upsertForUser({
+          userId: user.id,
+          tokenHash,
+          expiresAt,
+        });
+        await this.mail.sendPasswordResetMail(dto.email, token);
+      }
+    } catch (e) {
+      // Deliberately swallowed: the response must be identical whether the
+      // account exists, the account is ineligible, or something failed
+      // internally. Never let a DB/provider error leak through as a
+      // different status code or body.
+      const message = e instanceof Error ? e.message : String(e);
+      this.logger.error(
+        `forgotPassword failed. email=${maskEmail(dto.email)} requestId=${requestId ?? 'unknown'} error=${message}`,
+      );
+    }
+
+    return { ok: true };
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    if (dto.password !== dto.confirmPassword) {
+      throw new AppException(
+        HttpStatus.BAD_REQUEST,
+        'AUTH_PASSWORDS_DO_NOT_MATCH',
+      );
+    }
+
+    const now = new Date();
+    const tokenHash = sha256Hex(dto.token);
+
+    const request = await this.passwordResetRepo.findByTokenHash(tokenHash);
+    if (!request) {
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
+    }
+
+    if (request.expiresAt <= now) {
+      await this.passwordResetRepo.deleteExpired({
+        id: request.id,
+        tokenHash,
+        now,
+      });
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_TOKEN_EXPIRED');
+    }
+
+    const passwordHash = await argon.hash(dto.password);
+    const consumed = await this.passwordResetRepo.consumeAndApplyPassword({
+      id: request.id,
+      tokenHash,
+      userId: request.userId,
+      passwordHash,
+      now,
+    });
+
+    if (!consumed) {
+      // Lost the race: a concurrent request already consumed this token, or
+      // it was replaced by a newer forgot-password call, or it expired in
+      // the gap between the read above and this write.
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
+    }
+
+    return { ok: true };
   }
 
   async refresh(refreshToken: string) {
