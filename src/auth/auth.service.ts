@@ -62,15 +62,17 @@ export class AuthService {
     this.dummyPasswordHash = argon.hash(randomUUID());
   }
 
+  private static readonly ACTIVATION_TTL_MS = 24 * 60 * 60 * 1000;
+
   async register(dto: RegisterDto) {
-    const exist = await this.userContactRepo.findByEmail(dto.email);
-
-    if (exist) {
-      throw new AppException(HttpStatus.CONFLICT, 'AUTH_EMAIL_ALREADY_EXISTS');
-    }
-
     if (dto.consentVersion !== CURRENT_TEACHER_CONSENT_VERSION) {
       throw new BadRequestException('Unsupported consent version');
+    }
+
+    const existingContact = await this.userContactRepo.findByEmail(dto.email);
+
+    if (existingContact) {
+      return this.reissueForExistingEmail(existingContact.userId, dto);
     }
 
     const passwordHash = await argon.hash(dto.password);
@@ -89,14 +91,73 @@ export class AuthService {
       passwordHash,
       roleId: teacherRole.id,
       activationToken,
-      activationExpires: new Date(Date.now() + 86400000),
+      activationExpires: new Date(Date.now() + AuthService.ACTIVATION_TTL_MS),
       email: dto.email,
       contactTypeId: contactType.id,
       consentAcceptedAt: new Date(),
       consentVersion: dto.consentVersion,
     };
 
-    await this.userRepo.createUserByEmail(data);
+    try {
+      await this.userRepo.createUserByEmail(data);
+    } catch (e) {
+      // Lost a race to a parallel first registration of the same address —
+      // the UserContact unique constraint guarantees only one user row was
+      // actually created. Fold into the same re-registration path rather
+      // than surfacing a 500 for a request that, from the client's
+      // perspective, did nothing wrong.
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002' &&
+        this.isContactUniqueViolation(e)
+      ) {
+        const winner = await this.userContactRepo.findByEmail(dto.email);
+        // The conflict really was on the email-contact constraint, but the
+        // re-lookup unexpectedly found nothing (e.g. the winning transaction
+        // rolled back afterwards). Never fabricate success — surface the
+        // original error so it fails loudly instead of silently.
+        if (!winner) throw e;
+        return this.reissueForExistingEmail(winner.userId, dto);
+      }
+      throw e;
+    }
+
+    await this.mail.sendActivationMail(dto.email, activationToken);
+
+    return { message: 'Activation email sent' };
+  }
+
+  // Re-issues activation for an email that already belongs to a user row —
+  // either because register() found it up front, or because it lost a
+  // create race to a concurrent first registration of the same address.
+  // Never touches passwordHash directly (see UserRepository.reissueActivation);
+  // the mail send is awaited before returning success so a provider failure
+  // here surfaces the same way it does for a first registration, instead of
+  // silently claiming an email was sent when it wasn't.
+  private async reissueForExistingEmail(userId: number, dto: RegisterDto) {
+    const user = await this.userRepo.findById(userId);
+
+    if (!user || user.verified) {
+      throw new AppException(HttpStatus.CONFLICT, 'AUTH_EMAIL_ALREADY_EXISTS');
+    }
+
+    const activationToken = randomUUID();
+    const pendingPasswordHash = await argon.hash(dto.password);
+
+    const applied = await this.userRepo.reissueActivation({
+      userId,
+      activationToken,
+      activationExpires: new Date(Date.now() + AuthService.ACTIVATION_TTL_MS),
+      pendingPasswordHash,
+      consentAcceptedAt: new Date(),
+      consentVersion: dto.consentVersion,
+    });
+
+    // Activated concurrently between the read above and this write.
+    if (!applied) {
+      throw new AppException(HttpStatus.CONFLICT, 'AUTH_EMAIL_ALREADY_EXISTS');
+    }
+
     await this.mail.sendActivationMail(dto.email, activationToken);
 
     return { message: 'Activation email sent' };
@@ -164,7 +225,7 @@ export class AuthService {
       if (
         e instanceof Prisma.PrismaClientKnownRequestError &&
         e.code === 'P2002' &&
-        this.isTelegramContactUniqueViolation(e)
+        this.isContactUniqueViolation(e)
       ) {
         const raceWinner = await this.userContactRepo.findByTelegram(
           dto.telegramId,
@@ -182,17 +243,19 @@ export class AuthService {
     }
   }
 
-  // The Telegram-contact compound unique constraint is
-  // @@unique([contactTypeId, contactValue]) on UserContact, which Postgres
-  // names "UserContact_contactTypeId_contactValue_key". Depending on how the
-  // conflict surfaces, Prisma's P2002 `meta.target` can be either the array
-  // of column names or that constraint name as a single string — support
-  // both, but require both field names to be present so an unrelated
-  // constraint (e.g. User.username) is never misclassified.
-  private static readonly TELEGRAM_CONTACT_UNIQUE_CONSTRAINT_NAME =
+  // The UserContact compound unique constraint is
+  // @@unique([contactTypeId, contactValue]), which Postgres names
+  // "UserContact_contactTypeId_contactValue_key". It backs both the
+  // Telegram-contact race guard above and the email-contact race guard in
+  // register(). Depending on how the conflict surfaces, Prisma's P2002
+  // `meta.target` can be either the array of column names or that
+  // constraint name as a single string — support both, but require both
+  // field names to be present so an unrelated constraint (e.g.
+  // User.username) is never misclassified.
+  private static readonly CONTACT_UNIQUE_CONSTRAINT_NAME =
     'UserContact_contactTypeId_contactValue_key';
 
-  private isTelegramContactUniqueViolation(
+  private isContactUniqueViolation(
     e: Prisma.PrismaClientKnownRequestError,
   ): boolean {
     const target = e.meta?.target;
@@ -204,7 +267,7 @@ export class AuthService {
     }
 
     if (typeof target === 'string') {
-      if (target === AuthService.TELEGRAM_CONTACT_UNIQUE_CONSTRAINT_NAME) {
+      if (target === AuthService.CONTACT_UNIQUE_CONSTRAINT_NAME) {
         return true;
       }
       return (
@@ -216,26 +279,19 @@ export class AuthService {
   }
 
   async activate(token: string) {
-    const user = await this.userRepo.findByActivationToken(token);
+    const result = await this.userRepo.consumeActivation({
+      token,
+      now: new Date(),
+    });
 
-    if (!user) {
-      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
+    switch (result) {
+      case 'activated':
+        return { message: 'Account activated' };
+      case 'expired':
+        throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_TOKEN_EXPIRED');
+      case 'not_found':
+        throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
     }
-
-    if (user.verified) {
-      return { message: 'Account already activated' };
-    }
-
-    const now = new Date();
-
-    if (!user.activationExpires || user.activationExpires < now) {
-      await this.userRepo.deleteUser(user.id);
-      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_TOKEN_EXPIRED');
-    }
-
-    await this.userRepo.updateUserVerification(user.id);
-
-    return { message: 'Account activated' };
   }
 
   async getByTelegramId(telegramId: number) {

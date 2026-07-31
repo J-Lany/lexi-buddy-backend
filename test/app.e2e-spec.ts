@@ -529,7 +529,17 @@ describe('App (e2e)', () => {
     });
 
     it('registration conflict returns 409 AUTH_EMAIL_ALREADY_EXISTS, not the raw Prisma/service message', async () => {
-      prismaMock.userContact.findFirst.mockResolvedValueOnce({ id: 1 } as any);
+      // Email belongs to an already-verified user — the re-registration path
+      // (register.e2e-spec.ts covers the unverified re-issue case) must fall
+      // straight through to the existing conflict response.
+      prismaMock.userContact.findFirst.mockResolvedValueOnce({
+        id: 1,
+        userId: 9,
+      } as any);
+      prismaMock.user.findUnique.mockResolvedValueOnce({
+        id: 9,
+        verified: true,
+      } as any);
 
       const res = await request(app.getHttpServer())
         .post('/auth/register')

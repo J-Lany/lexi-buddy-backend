@@ -100,6 +100,11 @@ model User {
   // Activation (доп. к ERD — по желанию)
   activationToken   String?
   activationExpires DateTime?
+  // Password submitted by a re-registration of an account that has not yet
+  // proven ownership of its email. Promoted into passwordHash only when the
+  // activation link is used, so an unconfirmed request can never change the
+  // credentials of an existing account.
+  pendingPasswordHash String?
 
   // Согласие с Пользовательским соглашением / Политикой конфиденциальности / ПДн
   consentAcceptedAt DateTime?

@@ -74,9 +74,8 @@ describe('AuthService (unit, manual DI)', () => {
     userRepo = {
       createUserByEmail: jest.fn(),
       createUserByTelegram: jest.fn(),
-      findByActivationToken: jest.fn(),
-      updateUserVerification: jest.fn(),
-      deleteUser: jest.fn(),
+      reissueActivation: jest.fn(),
+      consumeActivation: jest.fn(),
       findByEmail: jest.fn(),
       updateRefreshTokenHash: jest.fn(),
       findById: jest.fn(),
@@ -140,19 +139,33 @@ describe('AuthService (unit, manual DI)', () => {
   // REGISTER (EMAIL)
   // -------------------------------------------------------------------
   describe('register', () => {
-    it('should throw AppException(409, AUTH_EMAIL_ALREADY_EXISTS) if email already exists', async () => {
-      userContactRepo.findByEmail.mockResolvedValueOnce({ id: 1 } as any);
+    const SUCCESS_RESPONSE = { message: 'Activation email sent' };
 
-      await expectAppException(
-        service.register({ email: 'test@mail.com', password: '1234' } as any),
-        HttpStatus.CONFLICT,
-        'AUTH_EMAIL_ALREADY_EXISTS',
+    // -----------------------------------------------------------------
+    // 1. Brand-new email
+    // -----------------------------------------------------------------
+    it('creates a new user, issues a token, and sends the activation email for a brand-new email', async () => {
+      userContactRepo.findByEmail.mockResolvedValueOnce(null as any);
+      (argon.hash as jest.Mock).mockResolvedValueOnce('hashed-pass');
+      roleRepo.findGlobalRole.mockResolvedValueOnce({ id: 1 } as any);
+      contactTypeRepo.findByName.mockResolvedValueOnce({ id: 2 } as any);
+      userRepo.createUserByEmail.mockResolvedValueOnce({} as any);
+
+      const result = await service.register({
+        email: 'ok@mail.com',
+        password: '1234',
+        consentAccepted: true,
+        consentVersion: 1,
+      } as any);
+
+      expect(roleRepo.findGlobalRole).toHaveBeenCalledWith('teacher');
+      expect(contactTypeRepo.findByName).toHaveBeenCalledWith('email');
+      expect(userRepo.createUserByEmail).toHaveBeenCalledTimes(1);
+      expect(mailService.sendActivationMail).toHaveBeenCalledWith(
+        'ok@mail.com',
+        expect.any(String),
       );
-
-      expect(roleRepo.findGlobalRole).not.toHaveBeenCalled();
-      expect(contactTypeRepo.findByName).not.toHaveBeenCalled();
-      expect(userRepo.createUserByEmail).not.toHaveBeenCalled();
-      expect(mailService.sendActivationMail).not.toHaveBeenCalled();
+      expect(result).toEqual(SUCCESS_RESPONSE);
     });
 
     it('should throw if teacher role not found', async () => {
@@ -172,33 +185,9 @@ describe('AuthService (unit, manual DI)', () => {
       expect(roleRepo.findGlobalRole).toHaveBeenCalledWith('teacher');
     });
 
-    it('should call sendActivationMail after successful registration', async () => {
-      userContactRepo.findByEmail.mockResolvedValueOnce(null as any);
-      (argon.hash as jest.Mock).mockResolvedValueOnce('hashed-pass');
-      roleRepo.findGlobalRole.mockResolvedValueOnce({ id: 1 } as any);
-      contactTypeRepo.findByName.mockResolvedValueOnce({ id: 2 } as any);
-      userRepo.createUserByEmail.mockResolvedValueOnce({} as any);
-
-      await service.register({
-        email: 'ok@mail.com',
-        password: '1234',
-        consentAccepted: true,
-        consentVersion: 1,
-      } as any);
-
-      expect(roleRepo.findGlobalRole).toHaveBeenCalledWith('teacher');
-      expect(contactTypeRepo.findByName).toHaveBeenCalledWith('email');
-      expect(mailService.sendActivationMail).toHaveBeenCalledWith(
-        'ok@mail.com',
-        expect.any(String),
-      );
-    });
-
     it.each([0, -1, 2, 999])(
-      'should reject an unsupported consent version (%s) before touching repositories',
+      'should reject an unsupported consent version (%s) before touching any repository',
       async (consentVersion) => {
-        userContactRepo.findByEmail.mockResolvedValueOnce(null as any);
-
         await expect(
           service.register({
             email: 'ok@mail.com',
@@ -208,6 +197,7 @@ describe('AuthService (unit, manual DI)', () => {
           } as any),
         ).rejects.toThrow('Unsupported consent version');
 
+        expect(userContactRepo.findByEmail).not.toHaveBeenCalled();
         expect(roleRepo.findGlobalRole).not.toHaveBeenCalled();
         expect(userRepo.createUserByEmail).not.toHaveBeenCalled();
       },
@@ -235,6 +225,303 @@ describe('AuthService (unit, manual DI)', () => {
       expect(data.consentAcceptedAt).toBeInstanceOf(Date);
       expect(data.consentAcceptedAt.getTime()).toBeGreaterThanOrEqual(before);
       expect(data.consentAcceptedAt.getTime()).toBeLessThanOrEqual(after);
+    });
+
+    // -----------------------------------------------------------------
+    // 2. Email belongs to an already-verified user
+    // -----------------------------------------------------------------
+    it('returns AUTH_EMAIL_ALREADY_EXISTS for a verified user, without reissuing anything', async () => {
+      userContactRepo.findByEmail.mockResolvedValueOnce({ userId: 7 } as any);
+      userRepo.findById.mockResolvedValueOnce({
+        id: 7,
+        verified: true,
+      } as any);
+
+      await expectAppException(
+        service.register({
+          email: 'taken@mail.com',
+          password: 'whatever',
+          consentAccepted: true,
+          consentVersion: 1,
+        } as any),
+        HttpStatus.CONFLICT,
+        'AUTH_EMAIL_ALREADY_EXISTS',
+      );
+
+      expect(userRepo.reissueActivation).not.toHaveBeenCalled();
+      expect(userRepo.createUserByEmail).not.toHaveBeenCalled();
+      expect(userRepo.updatePasswordHash).not.toHaveBeenCalled();
+      expect(mailService.sendActivationMail).not.toHaveBeenCalled();
+    });
+
+    // -----------------------------------------------------------------
+    // 3 & 4. Email belongs to an unverified user — re-issue, regardless of
+    // whether the previous token had already expired (register() never
+    // inspects the old activationExpires; it unconditionally overwrites it).
+    // -----------------------------------------------------------------
+    it.each([
+      ['an unexpired existing token', new Date(Date.now() + 60_000)],
+      ['an expired existing token', new Date(Date.now() - 60_000)],
+    ])(
+      're-issues activation for an unverified user with %s, without creating a second user',
+      async (_label, existingActivationExpires) => {
+        userContactRepo.findByEmail.mockResolvedValueOnce({
+          userId: 42,
+        } as any);
+        userRepo.findById.mockResolvedValueOnce({
+          id: 42,
+          verified: false,
+          activationExpires: existingActivationExpires,
+        } as any);
+        (argon.hash as jest.Mock).mockResolvedValueOnce('new-hashed-pass');
+        userRepo.reissueActivation.mockResolvedValueOnce(true);
+
+        const result = await service.register({
+          email: 'pending@mail.com',
+          password: 'new-password',
+          consentAccepted: true,
+          consentVersion: 1,
+        } as any);
+
+        expect(userRepo.createUserByEmail).not.toHaveBeenCalled();
+        expect(userRepo.reissueActivation).toHaveBeenCalledTimes(1);
+        const args = userRepo.reissueActivation.mock.calls[0][0];
+        expect(args.userId).toBe(42);
+        expect(args.pendingPasswordHash).toBe('new-hashed-pass');
+        expect(args.activationToken).toEqual(expect.any(String));
+        expect(args.activationExpires).toBeInstanceOf(Date);
+        expect(args.consentAcceptedAt).toBeInstanceOf(Date);
+        expect(args.consentVersion).toBe(1);
+        // The re-issue must never touch the live passwordHash directly.
+        expect(args).not.toHaveProperty('passwordHash');
+
+        expect(mailService.sendActivationMail).toHaveBeenCalledWith(
+          'pending@mail.com',
+          args.activationToken,
+        );
+        expect(result).toEqual(SUCCESS_RESPONSE);
+      },
+    );
+
+    // -----------------------------------------------------------------
+    // 5. Re-registration with a different password
+    // -----------------------------------------------------------------
+    it('stages a different re-registration password as pendingPasswordHash and never touches the live passwordHash', async () => {
+      userContactRepo.findByEmail.mockResolvedValueOnce({
+        userId: 42,
+      } as any);
+      userRepo.findById.mockResolvedValueOnce({
+        id: 42,
+        verified: false,
+        activationExpires: new Date(Date.now() + 60_000),
+      } as any);
+      (argon.hash as jest.Mock).mockResolvedValueOnce('different-hashed-pass');
+      userRepo.reissueActivation.mockResolvedValueOnce(true);
+
+      await service.register({
+        email: 'pending@mail.com',
+        password: 'a-completely-different-password',
+        consentAccepted: true,
+        consentVersion: 1,
+      } as any);
+
+      expect(userRepo.reissueActivation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pendingPasswordHash: 'different-hashed-pass',
+        }),
+      );
+      expect(userRepo.updatePasswordHash).not.toHaveBeenCalled();
+    });
+
+    // -----------------------------------------------------------------
+    // 6. Email provider failure on the re-issue path
+    // -----------------------------------------------------------------
+    it('propagates a mail-provider failure on re-issue without returning success, and never logs the raw token', async () => {
+      userContactRepo.findByEmail.mockResolvedValueOnce({
+        userId: 42,
+      } as any);
+      userRepo.findById.mockResolvedValueOnce({
+        id: 42,
+        verified: false,
+        activationExpires: new Date(Date.now() + 60_000),
+      } as any);
+      (argon.hash as jest.Mock).mockResolvedValueOnce('hashed-pass');
+      userRepo.reissueActivation.mockResolvedValueOnce(true);
+      const providerError = new Error('Failed to send activation email');
+      mailService.sendActivationMail.mockRejectedValueOnce(providerError);
+      const errorSpy = jest.spyOn(Logger.prototype, 'error');
+
+      await expect(
+        service.register({
+          email: 'pending@mail.com',
+          password: '1234',
+          consentAccepted: true,
+          consentVersion: 1,
+        } as any),
+      ).rejects.toBe(providerError);
+
+      const issuedToken =
+        userRepo.reissueActivation.mock.calls[0][0].activationToken;
+      for (const call of errorSpy.mock.calls) {
+        expect(JSON.stringify(call)).not.toContain(issuedToken);
+      }
+      errorSpy.mockRestore();
+    });
+
+    // -----------------------------------------------------------------
+    // 7. Concurrent activation between the read and the re-issue write
+    // -----------------------------------------------------------------
+    it('returns AUTH_EMAIL_ALREADY_EXISTS if the account was activated concurrently during re-issue', async () => {
+      userContactRepo.findByEmail.mockResolvedValueOnce({
+        userId: 42,
+      } as any);
+      userRepo.findById.mockResolvedValueOnce({
+        id: 42,
+        verified: false,
+        activationExpires: new Date(Date.now() + 60_000),
+      } as any);
+      (argon.hash as jest.Mock).mockResolvedValueOnce('hashed-pass');
+      userRepo.reissueActivation.mockResolvedValueOnce(false);
+
+      await expectAppException(
+        service.register({
+          email: 'pending@mail.com',
+          password: '1234',
+          consentAccepted: true,
+          consentVersion: 1,
+        } as any),
+        HttpStatus.CONFLICT,
+        'AUTH_EMAIL_ALREADY_EXISTS',
+      );
+
+      expect(mailService.sendActivationMail).not.toHaveBeenCalled();
+    });
+
+    // -----------------------------------------------------------------
+    // 8, 9, 10. Concurrent FIRST registration of the same new email
+    // (P2002 on the UserContact unique constraint during createUserByEmail)
+    // -----------------------------------------------------------------
+    describe('P2002 race on a concurrent first registration', () => {
+      const raceDto = {
+        email: 'race@mail.com',
+        password: '1234',
+        consentAccepted: true,
+        consentVersion: 1,
+      };
+
+      function mockLosingCreate() {
+        userContactRepo.findByEmail.mockResolvedValueOnce(null as any); // pre-check: looks new
+        (argon.hash as jest.Mock).mockResolvedValueOnce('hashed-pass'); // hash for the losing attempt
+        roleRepo.findGlobalRole.mockResolvedValueOnce({ id: 1 } as any);
+        contactTypeRepo.findByName.mockResolvedValueOnce({ id: 2 } as any);
+        userRepo.createUserByEmail.mockRejectedValueOnce(
+          prismaUniqueConstraintError(['contactTypeId', 'contactValue']),
+        );
+      }
+
+      it('winner unverified: re-issues and awaits the mail send before returning success', async () => {
+        mockLosingCreate();
+        userContactRepo.findByEmail.mockResolvedValueOnce({
+          userId: 55,
+        } as any); // re-lookup after P2002
+        userRepo.findById.mockResolvedValueOnce({
+          id: 55,
+          verified: false,
+        } as any);
+        (argon.hash as jest.Mock).mockResolvedValueOnce('hashed-pass-2'); // hash inside reissue
+        userRepo.reissueActivation.mockResolvedValueOnce(true);
+
+        const result = await service.register(raceDto as any);
+
+        expect(userRepo.createUserByEmail).toHaveBeenCalledTimes(1);
+        expect(userRepo.reissueActivation).toHaveBeenCalledTimes(1);
+        expect(mailService.sendActivationMail).toHaveBeenCalledTimes(1);
+        expect(result).toEqual(SUCCESS_RESPONSE);
+      });
+
+      it('winner unverified but mail send fails: the request fails instead of returning success', async () => {
+        mockLosingCreate();
+        userContactRepo.findByEmail.mockResolvedValueOnce({
+          userId: 55,
+        } as any);
+        userRepo.findById.mockResolvedValueOnce({
+          id: 55,
+          verified: false,
+        } as any);
+        (argon.hash as jest.Mock).mockResolvedValueOnce('hashed-pass-2');
+        userRepo.reissueActivation.mockResolvedValueOnce(true);
+        mailService.sendActivationMail.mockRejectedValueOnce(
+          new Error('provider down'),
+        );
+
+        await expect(service.register(raceDto as any)).rejects.toThrow(
+          'provider down',
+        );
+      });
+
+      it('winner verified: returns AUTH_EMAIL_ALREADY_EXISTS and never sends mail', async () => {
+        mockLosingCreate();
+        userContactRepo.findByEmail.mockResolvedValueOnce({
+          userId: 55,
+        } as any);
+        userRepo.findById.mockResolvedValueOnce({
+          id: 55,
+          verified: true,
+        } as any);
+
+        await expectAppException(
+          service.register(raceDto as any),
+          HttpStatus.CONFLICT,
+          'AUTH_EMAIL_ALREADY_EXISTS',
+        );
+
+        expect(mailService.sendActivationMail).not.toHaveBeenCalled();
+      });
+
+      it('re-lookup finds nobody: rethrows the original P2002 instead of fabricating success', async () => {
+        mockLosingCreate();
+        userContactRepo.findByEmail.mockResolvedValueOnce(null as any); // re-lookup finds nothing
+
+        await expect(service.register(raceDto as any)).rejects.toMatchObject({
+          code: 'P2002',
+        });
+
+        expect(mailService.sendActivationMail).not.toHaveBeenCalled();
+      });
+    });
+
+    // -----------------------------------------------------------------
+    // 11. Two near-simultaneous re-registrations: distinct tokens, and only
+    // the latest one is meant to remain valid (single-use enforcement of
+    // that guarantee is covered at the repository level).
+    // -----------------------------------------------------------------
+    it('issues a fresh, distinct token on each re-registration call', async () => {
+      userContactRepo.findByEmail.mockResolvedValue({ userId: 42 } as any);
+      userRepo.findById.mockResolvedValue({
+        id: 42,
+        verified: false,
+        activationExpires: new Date(Date.now() + 60_000),
+      } as any);
+      (argon.hash as jest.Mock).mockResolvedValue('hashed-pass');
+      userRepo.reissueActivation.mockResolvedValue(true);
+
+      await service.register({
+        email: 'pending@mail.com',
+        password: '1234',
+        consentAccepted: true,
+        consentVersion: 1,
+      } as any);
+      await service.register({
+        email: 'pending@mail.com',
+        password: '5678',
+        consentAccepted: true,
+        consentVersion: 1,
+      } as any);
+
+      const [firstCall, secondCall] = userRepo.reissueActivation.mock.calls;
+      expect(firstCall[0].activationToken).not.toBe(
+        secondCall[0].activationToken,
+      );
     });
   });
 
@@ -507,62 +794,45 @@ describe('AuthService (unit, manual DI)', () => {
   // ACTIVATE
   // -------------------------------------------------------------------
   describe('activate', () => {
-    it('should throw AppException(400, AUTH_INVALID_TOKEN) if token is invalid', async () => {
-      userRepo.findByActivationToken.mockResolvedValueOnce(null as any);
+    // The token lifecycle itself (single-use, expiry, race-safety) is owned
+    // by UserRepository.consumeActivation and covered at the repository
+    // level (user.repository.spec.ts). This suite only verifies activate()
+    // maps each outcome to the right response/error code.
 
-      await expectAppException(
-        service.activate('invalid'),
-        HttpStatus.BAD_REQUEST,
-        'AUTH_INVALID_TOKEN',
-      );
+    it('returns Account activated when consumeActivation reports "activated"', async () => {
+      userRepo.consumeActivation.mockResolvedValueOnce('activated');
 
-      expect(userRepo.updateUserVerification).not.toHaveBeenCalled();
-      expect(userRepo.deleteUser).not.toHaveBeenCalled();
+      const result = await service.activate('valid-token');
+
+      expect(result).toEqual({ message: 'Account activated' });
+      expect(userRepo.consumeActivation).toHaveBeenCalledWith({
+        token: 'valid-token',
+        now: expect.any(Date),
+      });
     });
 
-    it('should return already activated if user is verified', async () => {
-      userRepo.findByActivationToken.mockResolvedValueOnce({
-        id: 1,
-        verified: true,
-        activationExpires: new Date(Date.now() - 1000),
-      } as any);
-
-      const result = await service.activate('any-token');
-
-      expect(result).toEqual({ message: 'Account already activated' });
-      expect(userRepo.updateUserVerification).not.toHaveBeenCalled();
-      expect(userRepo.deleteUser).not.toHaveBeenCalled();
-    });
-
-    it('should delete user and throw AppException(400, AUTH_TOKEN_EXPIRED) if token is expired and user not verified', async () => {
-      userRepo.findByActivationToken.mockResolvedValueOnce({
-        id: 1,
-        verified: false,
-        activationExpires: new Date(Date.now() - 1000),
-      } as any);
+    it('throws AUTH_TOKEN_EXPIRED when consumeActivation reports "expired"', async () => {
+      userRepo.consumeActivation.mockResolvedValueOnce('expired');
 
       await expectAppException(
         service.activate('expired-token'),
         HttpStatus.BAD_REQUEST,
         'AUTH_TOKEN_EXPIRED',
       );
-
-      expect(userRepo.deleteUser).toHaveBeenCalledWith(1);
-      expect(userRepo.updateUserVerification).not.toHaveBeenCalled();
     });
 
-    it('should mark user as verified if token is valid and not expired', async () => {
-      userRepo.findByActivationToken.mockResolvedValueOnce({
-        id: 1,
-        verified: false,
-        activationExpires: new Date(Date.now() + 60_000),
-      } as any);
+    // Covers all three "not_found" cases uniformly: an unknown token, a
+    // token that was already consumed by a prior activation (single-use —
+    // there is no more "already activated" success response), and a token
+    // superseded by a later re-registration.
+    it('throws AUTH_INVALID_TOKEN when consumeActivation reports "not_found"', async () => {
+      userRepo.consumeActivation.mockResolvedValueOnce('not_found');
 
-      const result = await service.activate('valid-token');
-
-      expect(result).toEqual({ message: 'Account activated' });
-      expect(userRepo.updateUserVerification).toHaveBeenCalledWith(1);
-      expect(userRepo.deleteUser).not.toHaveBeenCalled();
+      await expectAppException(
+        service.activate('stale-or-unknown-token'),
+        HttpStatus.BAD_REQUEST,
+        'AUTH_INVALID_TOKEN',
+      );
     });
   });
 

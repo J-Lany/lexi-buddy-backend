@@ -26,10 +26,8 @@ describe('TeacherRequestsService (unit, manual DI)', () => {
     userRepo = {
       findById: jest.fn(),
       findByIdWithContacts: jest.fn(),
-      findByActivationToken: jest.fn(),
       createUserByEmail: jest.fn(),
       createUserByTelegram: jest.fn(),
-      updateUserVerification: jest.fn(),
       findByEmail: jest.fn(),
       updateRefreshTokenHash: jest.fn(),
       findByTelegramId: jest.fn(),
