@@ -1,16 +1,19 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import * as argon from 'argon2';
 import { Prisma } from '@prisma/client';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes } from 'crypto';
 import { JwtService } from '@nestjs/jwt';
 import { MailService } from 'common/modules/mail/mail.service';
+import { AppException } from 'common/errors';
+import { maskEmail } from 'common/utils/mask-email';
+import { sha256Hex } from 'common/utils/hash-token';
 import {
   CURRENT_TEACHER_CONSENT_VERSION,
   CURRENT_TELEGRAM_CONSENT_VERSION,
@@ -21,16 +24,26 @@ import { ContactTypeRepository } from 'repositories/contact-type.repository';
 import { RoleRepository } from 'repositories/role.repository';
 import { UserContactRepository } from 'repositories/user-contact.repository';
 import { PasswordChangeRequestRepository } from 'repositories/password-change-request.repository';
+import { PasswordResetRequestRepository } from 'repositories/password-reset-request.repository';
 import { LoginrDto } from './dto/login.dto/login.dto';
 import { RegisterTelegramDto } from './dto/register-telegram.dto/register-telegram.dto';
 import { TelegramAvatarService } from 'common/modules/telegram/telegram-avatar.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RequestPasswordChangeDto } from './dto/request-password-change.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly secret: string;
+  // Computed once per process (never per login request) so that verifying a
+  // password for a nonexistent user/account takes a comparable amount of
+  // time to a real password check — this is what closes the "unknown email
+  // fails immediately" timing oracle in login(). The value itself is not a
+  // secret: it never needs to match any real password.
+  private readonly dummyPasswordHash: Promise<string>;
+
   constructor(
     private mail: MailService,
     private jwt: JwtService,
@@ -39,21 +52,27 @@ export class AuthService {
     private userContactRepo: UserContactRepository,
     private roleRepo: RoleRepository,
     private passwordChangeRepo: PasswordChangeRequestRepository,
+    private passwordResetRepo: PasswordResetRequestRepository,
     private telegramAvatarService?: TelegramAvatarService,
   ) {
     const secret = process.env.JWT_SECRET;
     if (!secret)
       throw new Error('JWT_SECRET must be set in environment variables');
     this.secret = secret;
+    this.dummyPasswordHash = argon.hash(randomUUID());
   }
 
+  private static readonly ACTIVATION_TTL_MS = 24 * 60 * 60 * 1000;
+
   async register(dto: RegisterDto) {
-    const exist = await this.userContactRepo.findByEmail(dto.email);
-
-    if (exist) throw new BadRequestException('Email already exist');
-
     if (dto.consentVersion !== CURRENT_TEACHER_CONSENT_VERSION) {
       throw new BadRequestException('Unsupported consent version');
+    }
+
+    const existingContact = await this.userContactRepo.findByEmail(dto.email);
+
+    if (existingContact) {
+      return this.reissueForExistingEmail(existingContact.userId, dto);
     }
 
     const passwordHash = await argon.hash(dto.password);
@@ -72,14 +91,73 @@ export class AuthService {
       passwordHash,
       roleId: teacherRole.id,
       activationToken,
-      activationExpires: new Date(Date.now() + 86400000),
+      activationExpires: new Date(Date.now() + AuthService.ACTIVATION_TTL_MS),
       email: dto.email,
       contactTypeId: contactType.id,
       consentAcceptedAt: new Date(),
       consentVersion: dto.consentVersion,
     };
 
-    await this.userRepo.createUserByEmail(data);
+    try {
+      await this.userRepo.createUserByEmail(data);
+    } catch (e) {
+      // Lost a race to a parallel first registration of the same address —
+      // the UserContact unique constraint guarantees only one user row was
+      // actually created. Fold into the same re-registration path rather
+      // than surfacing a 500 for a request that, from the client's
+      // perspective, did nothing wrong.
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002' &&
+        this.isContactUniqueViolation(e)
+      ) {
+        const winner = await this.userContactRepo.findByEmail(dto.email);
+        // The conflict really was on the email-contact constraint, but the
+        // re-lookup unexpectedly found nothing (e.g. the winning transaction
+        // rolled back afterwards). Never fabricate success — surface the
+        // original error so it fails loudly instead of silently.
+        if (!winner) throw e;
+        return this.reissueForExistingEmail(winner.userId, dto);
+      }
+      throw e;
+    }
+
+    await this.mail.sendActivationMail(dto.email, activationToken);
+
+    return { message: 'Activation email sent' };
+  }
+
+  // Re-issues activation for an email that already belongs to a user row —
+  // either because register() found it up front, or because it lost a
+  // create race to a concurrent first registration of the same address.
+  // Never touches passwordHash directly (see UserRepository.reissueActivation);
+  // the mail send is awaited before returning success so a provider failure
+  // here surfaces the same way it does for a first registration, instead of
+  // silently claiming an email was sent when it wasn't.
+  private async reissueForExistingEmail(userId: number, dto: RegisterDto) {
+    const user = await this.userRepo.findById(userId);
+
+    if (!user || user.verified) {
+      throw new AppException(HttpStatus.CONFLICT, 'AUTH_EMAIL_ALREADY_EXISTS');
+    }
+
+    const activationToken = randomUUID();
+    const pendingPasswordHash = await argon.hash(dto.password);
+
+    const applied = await this.userRepo.reissueActivation({
+      userId,
+      activationToken,
+      activationExpires: new Date(Date.now() + AuthService.ACTIVATION_TTL_MS),
+      pendingPasswordHash,
+      consentAcceptedAt: new Date(),
+      consentVersion: dto.consentVersion,
+    });
+
+    // Activated concurrently between the read above and this write.
+    if (!applied) {
+      throw new AppException(HttpStatus.CONFLICT, 'AUTH_EMAIL_ALREADY_EXISTS');
+    }
+
     await this.mail.sendActivationMail(dto.email, activationToken);
 
     return { message: 'Activation email sent' };
@@ -147,7 +225,7 @@ export class AuthService {
       if (
         e instanceof Prisma.PrismaClientKnownRequestError &&
         e.code === 'P2002' &&
-        this.isTelegramContactUniqueViolation(e)
+        this.isContactUniqueViolation(e)
       ) {
         const raceWinner = await this.userContactRepo.findByTelegram(
           dto.telegramId,
@@ -165,17 +243,19 @@ export class AuthService {
     }
   }
 
-  // The Telegram-contact compound unique constraint is
-  // @@unique([contactTypeId, contactValue]) on UserContact, which Postgres
-  // names "UserContact_contactTypeId_contactValue_key". Depending on how the
-  // conflict surfaces, Prisma's P2002 `meta.target` can be either the array
-  // of column names or that constraint name as a single string — support
-  // both, but require both field names to be present so an unrelated
-  // constraint (e.g. User.username) is never misclassified.
-  private static readonly TELEGRAM_CONTACT_UNIQUE_CONSTRAINT_NAME =
+  // The UserContact compound unique constraint is
+  // @@unique([contactTypeId, contactValue]), which Postgres names
+  // "UserContact_contactTypeId_contactValue_key". It backs both the
+  // Telegram-contact race guard above and the email-contact race guard in
+  // register(). Depending on how the conflict surfaces, Prisma's P2002
+  // `meta.target` can be either the array of column names or that
+  // constraint name as a single string — support both, but require both
+  // field names to be present so an unrelated constraint (e.g.
+  // User.username) is never misclassified.
+  private static readonly CONTACT_UNIQUE_CONSTRAINT_NAME =
     'UserContact_contactTypeId_contactValue_key';
 
-  private isTelegramContactUniqueViolation(
+  private isContactUniqueViolation(
     e: Prisma.PrismaClientKnownRequestError,
   ): boolean {
     const target = e.meta?.target;
@@ -187,7 +267,7 @@ export class AuthService {
     }
 
     if (typeof target === 'string') {
-      if (target === AuthService.TELEGRAM_CONTACT_UNIQUE_CONSTRAINT_NAME) {
+      if (target === AuthService.CONTACT_UNIQUE_CONSTRAINT_NAME) {
         return true;
       }
       return (
@@ -199,26 +279,19 @@ export class AuthService {
   }
 
   async activate(token: string) {
-    const user = await this.userRepo.findByActivationToken(token);
+    const result = await this.userRepo.consumeActivation({
+      token,
+      now: new Date(),
+    });
 
-    if (!user) {
-      throw new BadRequestException('Invalid token');
+    switch (result) {
+      case 'activated':
+        return { message: 'Account activated' };
+      case 'expired':
+        throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_TOKEN_EXPIRED');
+      case 'not_found':
+        throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
     }
-
-    if (user.verified) {
-      return { message: 'Account already activated' };
-    }
-
-    const now = new Date();
-
-    if (!user.activationExpires || user.activationExpires < now) {
-      await this.userRepo.deleteUser(user.id);
-      throw new BadRequestException('Activation token expired');
-    }
-
-    await this.userRepo.updateUserVerification(user.id);
-
-    return { message: 'Account activated' };
   }
 
   async getByTelegramId(telegramId: number) {
@@ -244,17 +317,39 @@ export class AuthService {
     const { email, password } = dto;
     const user = await this.userRepo.findByEmail(email);
 
-    if (!user || !user.passwordHash) {
-      throw new UnauthorizedException('User by this email is not found');
-    }
+    // Always run one Argon2 verify against a real-shaped hash — for a
+    // nonexistent user (or a user without a password hash, e.g. a
+    // Telegram-only account) we verify against a fixed dummy hash instead of
+    // returning early. This keeps a "no such user" login and a "wrong
+    // password" login taking a comparable amount of time, closing the most
+    // obvious timing oracle for user enumeration.
+    const hashToVerify = user?.passwordHash ?? (await this.dummyPasswordHash);
+    const passwordMatches = await argon
+      .verify(hashToVerify, password)
+      .catch(() => false);
 
-    if (!user.verified) {
-      throw new UnauthorizedException('Email not verified. Check your mailbox');
-    }
+    // `verified` is intentionally checked only after the password verify
+    // above — checking it earlier (or exiting before argon.verify runs)
+    // would reintroduce a timing/enumeration difference for unverified
+    // accounts.
+    if (!user || !user.passwordHash || !passwordMatches || !user.verified) {
+      let reason: string;
+      if (!user) reason = 'user not found';
+      else if (!user.passwordHash) reason = 'no password hash on account';
+      else if (!passwordMatches) reason = 'password mismatch';
+      else reason = 'email not verified';
 
-    const isValid = await argon.verify(user.passwordHash, password);
-    if (!isValid) {
-      throw new UnauthorizedException('Invalid password');
+      this.logger.debug(
+        `Login rejected. email=${maskEmail(email)} reason=${reason}`,
+      );
+
+      // Deliberately identical for all branches above: user-not-found,
+      // wrong-password, and unverified-email must be indistinguishable to
+      // the client.
+      throw new AppException(
+        HttpStatus.UNAUTHORIZED,
+        'AUTH_INVALID_CREDENTIALS',
+      );
     }
 
     const payload = { sub: user.id, roleId: user.roleId };
@@ -338,7 +433,10 @@ export class AuthService {
 
   async requestPasswordChange(userId: number, dto: RequestPasswordChangeDto) {
     if (dto.password !== dto.confirmPassword) {
-      throw new BadRequestException('Passwords do not match');
+      throw new AppException(
+        HttpStatus.BAD_REQUEST,
+        'AUTH_PASSWORDS_DO_NOT_MATCH',
+      );
     }
 
     const user = await this.userRepo.findByIdWithContacts(userId);
@@ -368,10 +466,12 @@ export class AuthService {
   async confirmPasswordChange(token: string) {
     const request = await this.passwordChangeRepo.findByToken(token);
 
-    if (!request) throw new BadRequestException('Invalid or expired token');
+    if (!request) {
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
+    }
     if (request.expiresAt < new Date()) {
       await this.passwordChangeRepo.deleteByUserId(request.userId);
-      throw new BadRequestException('Token has expired');
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_TOKEN_EXPIRED');
     }
 
     await this.userRepo.updatePasswordHash(
@@ -381,6 +481,94 @@ export class AuthService {
     await this.passwordChangeRepo.deleteByUserId(request.userId);
 
     return { message: 'Password changed successfully' };
+  }
+
+  // -------------------------------------------------------------------
+  // FORGOT / RESET PASSWORD (public flow)
+  //
+  // Unlike requestPasswordChange/confirmPasswordChange above (authorized,
+  // password chosen up front, must never be exposed publicly), this flow
+  // never learns the new password until reset-password is called with a
+  // valid token. See PasswordResetRequestRepository for the atomic-consume
+  // mechanism that makes reset-password race-safe.
+  // -------------------------------------------------------------------
+
+  async forgotPassword(dto: ForgotPasswordDto, requestId?: string) {
+    try {
+      const user = await this.userRepo.findByEmail(dto.email);
+
+      // Only email/password accounts that completed email verification can
+      // use this flow — same gate as login(). Telegram-only accounts (no
+      // passwordHash) and unverified accounts are silently skipped: no email
+      // is sent, but the response below is identical either way.
+      if (user && user.passwordHash && user.verified) {
+        const token = randomBytes(32).toString('hex');
+        const tokenHash = sha256Hex(token);
+        const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+        await this.passwordResetRepo.upsertForUser({
+          userId: user.id,
+          tokenHash,
+          expiresAt,
+        });
+        await this.mail.sendPasswordResetMail(dto.email, token);
+      }
+    } catch (e) {
+      // Deliberately swallowed: the response must be identical whether the
+      // account exists, the account is ineligible, or something failed
+      // internally. Never let a DB/provider error leak through as a
+      // different status code or body.
+      const message = e instanceof Error ? e.message : String(e);
+      this.logger.error(
+        `forgotPassword failed. email=${maskEmail(dto.email)} requestId=${requestId ?? 'unknown'} error=${message}`,
+      );
+    }
+
+    return { ok: true };
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    if (dto.password !== dto.confirmPassword) {
+      throw new AppException(
+        HttpStatus.BAD_REQUEST,
+        'AUTH_PASSWORDS_DO_NOT_MATCH',
+      );
+    }
+
+    const now = new Date();
+    const tokenHash = sha256Hex(dto.token);
+
+    const request = await this.passwordResetRepo.findByTokenHash(tokenHash);
+    if (!request) {
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
+    }
+
+    if (request.expiresAt <= now) {
+      await this.passwordResetRepo.deleteExpired({
+        id: request.id,
+        tokenHash,
+        now,
+      });
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_TOKEN_EXPIRED');
+    }
+
+    const passwordHash = await argon.hash(dto.password);
+    const consumed = await this.passwordResetRepo.consumeAndApplyPassword({
+      id: request.id,
+      tokenHash,
+      userId: request.userId,
+      passwordHash,
+      now,
+    });
+
+    if (!consumed) {
+      // Lost the race: a concurrent request already consumed this token, or
+      // it was replaced by a newer forgot-password call, or it expired in
+      // the gap between the read above and this write.
+      throw new AppException(HttpStatus.BAD_REQUEST, 'AUTH_INVALID_TOKEN');
+    }
+
+    return { ok: true };
   }
 
   async refresh(refreshToken: string) {
@@ -414,8 +602,10 @@ export class AuthService {
       await this.userRepo.updateRefreshTokenHash(user.id, newRefreshHash);
 
       return { accessToken: newAccessToken, refreshToken: newRefreshToken };
-    } catch {
-      throw new UnauthorizedException('Invalid or expired refresh token');
+    } catch (err) {
+      throw new AppException(HttpStatus.UNAUTHORIZED, 'AUTH_SESSION_EXPIRED', {
+        internalReason: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }

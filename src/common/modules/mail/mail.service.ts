@@ -6,21 +6,32 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
+import { maskEmail } from 'common/utils/mask-email';
 
 export const RESEND_CLIENT = Symbol('RESEND_CLIENT');
 
 const ACTIVATION_SUBJECT = 'Activate your Lexi Buddy account';
 const PASSWORD_CHANGE_SUBJECT = 'Confirm your password change — Lexi Buddy';
+const PASSWORD_RESET_SUBJECT = 'Reset your password — Lexi Buddy';
 const DEFAULT_LOGO_URL =
   'https://edfc0c93-c754-494d-9f9c-76185dc39b2d.selstorage.ru/icon.png';
+
+// Frontend paths live here, in code — only the origin (FRONTEND_BASE_URL) is
+// configured via env. Add a new frontend auth page by adding a route here,
+// not by adding another env var. Values must match the real routes in
+// lexi-buddy-frontend/src/shared/router/routes.ts.
+const FRONTEND_AUTH_ROUTES = {
+  activation: '/activate',
+  confirmPasswordChange: '/confirm-password-change',
+  resetPassword: '/reset-password',
+} as const;
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
 
   private readonly from: string;
-  private readonly activationBaseUrl: string;
-  private readonly passwordChangeBaseUrl: string;
+  private readonly frontendBaseUrl: string;
   private readonly logoUrl: string;
 
   constructor(
@@ -28,17 +39,22 @@ export class MailService {
     private readonly configService: ConfigService,
   ) {
     this.from = this.configService.getOrThrow<string>('MAIL_FROM');
-    this.activationBaseUrl =
-      this.configService.getOrThrow<string>('ACTIVATION_URL');
-    this.passwordChangeBaseUrl = this.configService.getOrThrow<string>(
-      'PASSWORD_CHANGE_URL',
-    );
+    this.frontendBaseUrl =
+      this.configService.getOrThrow<string>('FRONTEND_BASE_URL');
+    // Fail fast at boot if FRONTEND_BASE_URL is not a valid URL, rather than
+    // discovering it when the first email tries to send.
+    new URL(this.frontendBaseUrl);
     this.logoUrl =
       this.configService.get<string>('MAIL_LOGO_URL') ?? DEFAULT_LOGO_URL;
   }
 
   async sendActivationMail(email: string, token: string): Promise<void> {
-    const activationUrl = this.buildActivationUrl(token);
+    const activationUrl = this.buildFrontendUrl(
+      FRONTEND_AUTH_ROUTES.activation,
+      {
+        token,
+      },
+    );
 
     try {
       const response = await this.resend.emails.send({
@@ -58,7 +74,7 @@ export class MailService {
 
       if (response.error) {
         this.logger.error(
-          `Failed to send activation email. recipient=${this.maskEmail(email)} providerError=${this.stringifyProviderError(response.error)}`,
+          `Failed to send activation email. recipient=${maskEmail(email)} providerError=${this.stringifyProviderError(response.error)}`,
         );
         throw new InternalServerErrorException(
           'Failed to send activation email',
@@ -66,7 +82,7 @@ export class MailService {
       }
 
       this.logger.log(
-        `Activation email sent. recipient=${this.maskEmail(email)} emailId=${response.data?.id ?? 'unknown'}`,
+        `Activation email sent. recipient=${maskEmail(email)} emailId=${response.data?.id ?? 'unknown'}`,
       );
     } catch (error) {
       if (error instanceof InternalServerErrorException) {
@@ -77,7 +93,7 @@ export class MailService {
         error instanceof Error ? error.message : 'Unknown unexpected error';
 
       this.logger.error(
-        `Unexpected error while sending activation email. recipient=${this.maskEmail(email)} error=${message}`,
+        `Unexpected error while sending activation email. recipient=${maskEmail(email)} error=${message}`,
       );
 
       throw new InternalServerErrorException('Failed to send activation email');
@@ -85,9 +101,10 @@ export class MailService {
   }
 
   async sendPasswordChangeMail(email: string, token: string): Promise<void> {
-    const confirmUrl = new URL(this.passwordChangeBaseUrl);
-    confirmUrl.searchParams.set('token', token);
-    const confirmUrlStr = confirmUrl.toString();
+    const confirmUrlStr = this.buildFrontendUrl(
+      FRONTEND_AUTH_ROUTES.confirmPasswordChange,
+      { token },
+    );
 
     try {
       const response = await this.resend.emails.send({
@@ -126,7 +143,7 @@ export class MailService {
 
       if (response.error) {
         this.logger.error(
-          `Failed to send password change email. recipient=${this.maskEmail(email)} providerError=${this.stringifyProviderError(response.error)}`,
+          `Failed to send password change email. recipient=${maskEmail(email)} providerError=${this.stringifyProviderError(response.error)}`,
         );
         throw new InternalServerErrorException(
           'Failed to send password change email',
@@ -134,7 +151,7 @@ export class MailService {
       }
 
       this.logger.log(
-        `Password change email sent. recipient=${this.maskEmail(email)} emailId=${response.data?.id ?? 'unknown'}`,
+        `Password change email sent. recipient=${maskEmail(email)} emailId=${response.data?.id ?? 'unknown'}`,
       );
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
@@ -143,7 +160,7 @@ export class MailService {
         error instanceof Error ? error.message : 'Unknown unexpected error';
 
       this.logger.error(
-        `Unexpected error while sending password change email. recipient=${this.maskEmail(email)} error=${message}`,
+        `Unexpected error while sending password change email. recipient=${maskEmail(email)} error=${message}`,
       );
 
       throw new InternalServerErrorException(
@@ -152,9 +169,92 @@ export class MailService {
     }
   }
 
-  private buildActivationUrl(token: string): string {
-    const url = new URL(this.activationBaseUrl);
-    url.searchParams.set('token', token);
+  async sendPasswordResetMail(email: string, token: string): Promise<void> {
+    const resetUrlStr = this.buildFrontendUrl(
+      FRONTEND_AUTH_ROUTES.resetPassword,
+      {
+        token,
+      },
+    );
+
+    try {
+      const response = await this.resend.emails.send({
+        from: this.from,
+        to: email,
+        subject: PASSWORD_RESET_SUBJECT,
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
+            <img src="cid:lexi-logo" alt="Lexi Buddy" width="72" height="72"
+              style="display:block; border-radius:16px; margin-bottom:16px;" />
+            <h2 style="margin: 0 0 12px;">Reset your password</h2>
+            <p style="margin: 0 0 16px;">Click the button below to choose a new password. The link expires in 30 minutes.</p>
+            <p style="margin: 24px 0;">
+              <a href="${resetUrlStr}" style="background:#111827;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:10px;display:inline-block;">
+                Reset password
+              </a>
+            </p>
+            <p style="margin: 0; color:#6b7280; font-size:14px;">If you did not request this, ignore this email — your password will not change.</p>
+            <p style="margin: 8px 0 0; font-size:14px;"><a href="${resetUrlStr}">${resetUrlStr}</a></p>
+          </div>
+        `,
+        text: [
+          'Reset your password on Lexi Buddy.',
+          'Click the link below (expires in 30 minutes):',
+          resetUrlStr,
+          'If you did not request this, ignore this email.',
+        ].join('\n'),
+        attachments: [
+          {
+            path: this.logoUrl,
+            filename: 'lexi-buddy-icon.png',
+            contentId: 'lexi-logo',
+          },
+        ],
+      });
+
+      if (response.error) {
+        this.logger.error(
+          `Failed to send password reset email. recipient=${maskEmail(email)} providerError=${this.stringifyProviderError(response.error)}`,
+        );
+        throw new InternalServerErrorException(
+          'Failed to send password reset email',
+        );
+      }
+
+      this.logger.log(
+        `Password reset email sent. recipient=${maskEmail(email)} emailId=${response.data?.id ?? 'unknown'}`,
+      );
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) throw error;
+
+      const message =
+        error instanceof Error ? error.message : 'Unknown unexpected error';
+
+      this.logger.error(
+        `Unexpected error while sending password reset email. recipient=${maskEmail(email)} error=${message}`,
+      );
+
+      throw new InternalServerErrorException(
+        'Failed to send password reset email',
+      );
+    }
+  }
+
+  /** Builds an absolute frontend URL from a path (see FRONTEND_AUTH_ROUTES)
+   * and optional query params, safely — via `new URL` + `searchParams.set`,
+   * never manual string concatenation. Never log the result: it may carry a
+   * sensitive token in its query string. */
+  private buildFrontendUrl(
+    pathname: string,
+    query?: Record<string, string>,
+  ): string {
+    const url = new URL(pathname, this.frontendBaseUrl);
+
+    if (query) {
+      for (const [key, value] of Object.entries(query)) {
+        url.searchParams.set(key, value);
+      }
+    }
 
     return url.toString();
   }
@@ -209,15 +309,6 @@ export class MailService {
       'Activate your account using the link below:',
       activationUrl,
     ].join('\n');
-  }
-
-  private maskEmail(email: string): string {
-    const [localPart = '', domainPart = ''] = email.split('@');
-
-    const visiblePart = localPart.slice(0, 2);
-    const hiddenLength = Math.max(localPart.length - visiblePart.length, 1);
-
-    return `${visiblePart}${'*'.repeat(hiddenLength)}@${domainPart}`;
   }
 
   private stringifyProviderError(error: unknown): string {

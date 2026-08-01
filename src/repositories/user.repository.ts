@@ -6,13 +6,72 @@ import { PrismaService } from 'common/modules/prisma/prisma.service';
 export class UserRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findByActivationToken(token: string) {
-    return this.prisma.user.findFirst({ where: { activationToken: token } });
+  /** Re-issues activation for an existing, not-yet-verified user (a
+   * re-registration). Scoped by `verified: false` so this can never touch an
+   * already-activated account; `passwordHash` is deliberately absent from the
+   * write — the new password only becomes live once the activation link is
+   * used (see consumeActivation). Returns false if the account was activated
+   * concurrently between the caller's read and this write. */
+  async reissueActivation(args: {
+    userId: number;
+    activationToken: string;
+    activationExpires: Date;
+    pendingPasswordHash: string;
+    consentAcceptedAt: Date;
+    consentVersion: number;
+  }): Promise<boolean> {
+    const { count } = await this.prisma.user.updateMany({
+      where: { id: args.userId, verified: false },
+      data: {
+        activationToken: args.activationToken,
+        activationExpires: args.activationExpires,
+        pendingPasswordHash: args.pendingPasswordHash,
+        consentAcceptedAt: args.consentAcceptedAt,
+        consentVersion: args.consentVersion,
+      },
+    });
+    return count === 1;
   }
 
-  async deleteUser(userId: number) {
-    await this.prisma.user.delete({
-      where: { id: userId },
+  /** Atomically consumes an activation token: single-use, so a second use of
+   * the same link (or one superseded by a later re-registration) resolves to
+   * 'not_found' rather than repeating a stale success. On success, any
+   * pendingPasswordHash staged by a re-registration is promoted into
+   * passwordHash in the same write — the account's real password can only
+   * change once ownership of the mailbox is proven this way. */
+  async consumeActivation(args: {
+    token: string;
+    now: Date;
+  }): Promise<'activated' | 'expired' | 'not_found'> {
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.findFirst({
+        where: { activationToken: args.token },
+        select: {
+          id: true,
+          activationExpires: true,
+          pendingPasswordHash: true,
+        },
+      });
+
+      if (!user) return 'not_found';
+      if (!user.activationExpires || user.activationExpires < args.now) {
+        return 'expired';
+      }
+
+      const { count } = await tx.user.updateMany({
+        where: { id: user.id, verified: false, activationToken: args.token },
+        data: {
+          verified: true,
+          activationToken: null,
+          activationExpires: null,
+          pendingPasswordHash: null,
+          ...(user.pendingPasswordHash
+            ? { passwordHash: user.pendingPasswordHash }
+            : {}),
+        },
+      });
+
+      return count === 1 ? 'activated' : 'not_found';
     });
   }
 
@@ -77,17 +136,6 @@ export class UserRepository {
         },
       },
       select: { id: true },
-    });
-  }
-
-  async updateUserVerification(userId: number) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        verified: true,
-        activationToken: null,
-        activationExpires: null,
-      },
     });
   }
 
