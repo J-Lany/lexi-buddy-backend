@@ -1,14 +1,18 @@
 import { AgeGroup, InstructionLanguage, Language, Level } from '@prisma/client';
 import {
+  ArrayMaxSize,
+  ArrayNotEmpty,
   IsEnum,
   IsInt,
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   IsArray,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { MAX_GENERATION_WORDS } from '../constants';
 
 export enum FrontAssignmentType {
   DEFINITION_QUIZ = 'definition_quiz',
@@ -25,12 +29,15 @@ export class AssignmentPreviewDto {
   @ApiProperty()
   @IsInt()
   @Min(1)
-  @Max(15)
+  @Max(MAX_GENERATION_WORDS)
   questionsCount!: number;
 
-  @ApiProperty()
+  @ApiProperty({ maxItems: MAX_GENERATION_WORDS })
   @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(MAX_GENERATION_WORDS)
   @IsString({ each: true })
+  @MaxLength(100, { each: true })
   terms!: string[];
 
   @ApiProperty()

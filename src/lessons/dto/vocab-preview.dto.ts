@@ -9,12 +9,13 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
+import { MAX_GENERATION_WORDS } from '../constants';
 
 export class VocabPreviewDto {
-  @ApiProperty({ maxItems: 50 })
+  @ApiProperty({ maxItems: MAX_GENERATION_WORDS })
   @IsArray()
   @ArrayNotEmpty()
-  @ArrayMaxSize(50)
+  @ArrayMaxSize(MAX_GENERATION_WORDS)
   @IsString({ each: true })
   @MaxLength(100, { each: true })
   terms!: string[];
