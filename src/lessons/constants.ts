@@ -1,1 +1,1 @@
-export const MAX_GENERATION_WORDS = 10;
+export const MAX_GENERATION_WORDS = 15;
