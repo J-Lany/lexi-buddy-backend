@@ -161,6 +161,8 @@ Return ONLY a JSON array, no other text. Each element MUST be:
 
 If there are no good simple synonyms, use an empty array [].
 
+Return exactly one object for every phrase listed below, in the same order. Do not omit any phrase.
+
 Target phrases:
 ${words.map((w) => `- ${w}`).join('\n')}
   `.trim();

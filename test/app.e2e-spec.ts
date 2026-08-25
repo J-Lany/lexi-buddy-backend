@@ -10,8 +10,10 @@ import { MailService } from '../src/common/modules/mail/mail.service';
 import { TelegramNotificationsService } from '../src/common/modules/notifications/telegram-notifications.service';
 import { StorageService } from '../src/common/modules/storage/storage.service';
 import { AiService } from '../src/ai/ai.service';
+import jwt from 'jsonwebtoken';
 import { AllExceptionsFilter } from '../src/common/filters/all-exceptions.filter';
 import { validationErrorsToAppException } from '../src/common/errors';
+import { MAX_GENERATION_WORDS } from '../src/lessons/constants';
 
 // Minimal Prisma mock — individual tests fill in model methods as needed
 const createPrismaMock = () => ({
@@ -348,6 +350,88 @@ describe('App (e2e)', () => {
       await request(app.getHttpServer())
         .post('/lessons/vocab/preview')
         .expect(401);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // POST /lessons/vocab/preview & /lessons/assignments/preview
+  // MAX_GENERATION_WORDS boundary (direct-API-call bypass check)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('POST /lessons/vocab/preview & /lessons/assignments/preview — word count limit', () => {
+    // Signs a JWT directly rather than going through POST /auth/login, so these
+    // tests don't share that route's throttle bucket with the login test suite.
+    function authHeader() {
+      const token = jwt.sign(
+        { sub: 42, roleId: 1 },
+        process.env.JWT_SECRET as string,
+        {
+          expiresIn: '1h',
+        },
+      );
+      return `Bearer ${token}`;
+    }
+
+    function words(count: number) {
+      return Array.from({ length: count }, (_, i) => `word${i}`);
+    }
+
+    it(`POST /lessons/vocab/preview accepts exactly ${MAX_GENERATION_WORDS} terms`, async () => {
+      await request(app.getHttpServer())
+        .post('/lessons/vocab/preview')
+        .set('Authorization', authHeader())
+        .send({ terms: words(MAX_GENERATION_WORDS) })
+        .expect(201);
+    });
+
+    it(`POST /lessons/vocab/preview returns 400 VALIDATION_FAILED for ${MAX_GENERATION_WORDS + 1} terms`, async () => {
+      const res = await request(app.getHttpServer())
+        .post('/lessons/vocab/preview')
+        .set('Authorization', authHeader())
+        .send({ terms: words(MAX_GENERATION_WORDS + 1) })
+        .expect(400);
+
+      expect(res.body).toMatchObject({
+        statusCode: 400,
+        code: 'VALIDATION_FAILED',
+        details: { fields: [{ field: 'terms' }] },
+      });
+    });
+
+    it(`POST /lessons/assignments/preview returns 400 VALIDATION_FAILED for ${MAX_GENERATION_WORDS + 1} terms`, async () => {
+      const res = await request(app.getHttpServer())
+        .post('/lessons/assignments/preview')
+        .set('Authorization', authHeader())
+        .send({
+          type: 'definition_quiz',
+          questionsCount: MAX_GENERATION_WORDS,
+          terms: words(MAX_GENERATION_WORDS + 1),
+        })
+        .expect(400);
+
+      expect(res.body).toMatchObject({
+        statusCode: 400,
+        code: 'VALIDATION_FAILED',
+        details: { fields: [{ field: 'terms' }] },
+      });
+    });
+
+    it(`POST /lessons/assignments/preview returns 400 VALIDATION_FAILED for questionsCount ${MAX_GENERATION_WORDS + 1}`, async () => {
+      const res = await request(app.getHttpServer())
+        .post('/lessons/assignments/preview')
+        .set('Authorization', authHeader())
+        .send({
+          type: 'definition_quiz',
+          questionsCount: MAX_GENERATION_WORDS + 1,
+          terms: words(MAX_GENERATION_WORDS),
+        })
+        .expect(400);
+
+      expect(res.body).toMatchObject({
+        statusCode: 400,
+        code: 'VALIDATION_FAILED',
+        details: { fields: [{ field: 'questionsCount' }] },
+      });
     });
   });
 
