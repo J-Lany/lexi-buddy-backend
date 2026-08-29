@@ -6,7 +6,7 @@ import { RoleRepository } from 'repositories/role.repository';
 import { UserRepository } from 'repositories/user.repository';
 import { GroupInviteRepository } from 'repositories/group-invite.repository';
 import { TelegramNotificationsService } from 'common/modules/notifications/telegram-notifications.service';
-import { GroupInviteStatus } from '@prisma/client';
+import { GroupInviteStatus, Prisma } from '@prisma/client';
 import { TeacherRequestAction } from './dto/respond-teacher-request.dto';
 
 describe('TeacherRequestsService (unit, manual DI)', () => {
@@ -41,6 +41,7 @@ describe('TeacherRequestsService (unit, manual DI)', () => {
       addStudentToGroup: jest.fn(),
       findByTeacher: jest.fn(),
       findPendingInvite: jest.fn(), // ✅ added after service update
+      respondToPendingTeacherRequest: jest.fn(),
     } as any;
 
     telegramNotifications = {
@@ -119,17 +120,100 @@ describe('TeacherRequestsService (unit, manual DI)', () => {
       roleRepo.findGroupRole.mockResolvedValueOnce({ id: 10 } as any); // teacher group role
       groupInviteRepo.findPendingInvite.mockResolvedValueOnce({
         id: 999,
+        expiresAt: new Date(Date.now() - 60_000),
       } as any);
 
-      await expect(service.requestStudent(1, dto)).rejects.toThrow(
-        'Invite already pending',
-      );
+      await expect(service.requestStudent(1, dto)).rejects.toMatchObject({
+        code: 'TEACHER_REQUEST_ALREADY_PENDING',
+      });
 
       expect(groupInviteRepo.findPendingInvite).toHaveBeenCalledWith(1, 2);
       expect(
         groupInviteRepo.createIndividualGroupWithInvite,
       ).not.toHaveBeenCalled();
       expect(telegramNotifications.sendTeacherRequest).not.toHaveBeenCalled();
+    });
+
+    it.each([GroupInviteStatus.ACCEPTED, GroupInviteStatus.DECLINED])(
+      '%s history does not block a new request',
+      async () => {
+        userRepo.findByIdWithContacts.mockResolvedValueOnce({
+          id: 2,
+          contacts: [],
+        } as any);
+        userRepo.findById.mockResolvedValueOnce({ id: 1 } as any);
+        roleRepo.findGroupRole.mockResolvedValueOnce({ id: 10 } as any);
+        // findPendingInvite scopes its query to PENDING, so historical rows
+        // produce null and remain preserved without blocking a new request.
+        groupInviteRepo.findPendingInvite.mockResolvedValueOnce(null as any);
+        groupInviteRepo.createIndividualGroupWithInvite.mockResolvedValueOnce({
+          group: { id: 100 },
+          invite: { id: 200, status: GroupInviteStatus.PENDING },
+        } as any);
+
+        await expect(service.requestStudent(1, dto)).resolves.toMatchObject({
+          status: GroupInviteStatus.PENDING,
+        });
+        expect(
+          groupInviteRepo.createIndividualGroupWithInvite,
+        ).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it('maps the pending-pair P2002 even if the winner is no longer pending', async () => {
+      userRepo.findByIdWithContacts.mockResolvedValueOnce({
+        id: 2,
+        contacts: [],
+      } as any);
+      userRepo.findById.mockResolvedValueOnce({ id: 1 } as any);
+      roleRepo.findGroupRole.mockResolvedValueOnce({ id: 10 } as any);
+      groupInviteRepo.findPendingInvite
+        .mockResolvedValueOnce(null)
+        // If consulted after the P2002, this represents the winner already
+        // transitioning to ACCEPTED or DECLINED.
+        .mockResolvedValueOnce(null);
+      groupInviteRepo.createIndividualGroupWithInvite.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: '5.15.0',
+          meta: {
+            // Prisma 5.15's PostgreSQL connector reports fields parsed from
+            // PostgreSQL DETAIL, not the custom partial-index name.
+            target: ['inviterId', 'inviteeId'],
+          },
+        }),
+      );
+
+      await expect(service.requestStudent(1, dto)).rejects.toMatchObject({
+        code: 'TEACHER_REQUEST_ALREADY_PENDING',
+      });
+      expect(groupInviteRepo.findPendingInvite).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not mask an unrelated P2002 when no pending race winner exists', async () => {
+      const unrelated = new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed',
+        {
+          code: 'P2002',
+          clientVersion: '5.15.0',
+          meta: { target: ['someOtherField'] },
+        },
+      );
+      userRepo.findByIdWithContacts.mockResolvedValueOnce({
+        id: 2,
+        contacts: [],
+      } as any);
+      userRepo.findById.mockResolvedValueOnce({ id: 1 } as any);
+      roleRepo.findGroupRole.mockResolvedValueOnce({ id: 10 } as any);
+      groupInviteRepo.findPendingInvite
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      groupInviteRepo.createIndividualGroupWithInvite.mockRejectedValueOnce(
+        unrelated,
+      );
+
+      await expect(service.requestStudent(1, dto)).rejects.toBe(unrelated);
+      expect(groupInviteRepo.findPendingInvite).toHaveBeenCalledTimes(1);
     });
 
     it('should create group + invite and NOT call telegram if no telegram contact', async () => {
@@ -258,72 +342,56 @@ describe('TeacherRequestsService (unit, manual DI)', () => {
     const studentId = 2;
     const inviteId = 200;
 
-    it('should throw if invite not found', async () => {
-      groupInviteRepo.findInviteForStudent.mockResolvedValueOnce(null);
+    it('maps a missing request to a stable domain code', async () => {
+      groupInviteRepo.respondToPendingTeacherRequest.mockResolvedValueOnce({
+        outcome: 'not_found',
+      });
 
       await expect(
         service.respondToRequest(studentId, inviteId, {
           action: TeacherRequestAction.ACCEPT,
         }),
-      ).rejects.toThrow('Invite not found');
+      ).rejects.toMatchObject({ code: 'TEACHER_REQUEST_NOT_FOUND' });
     });
 
-    it('should throw if invite is not pending', async () => {
-      groupInviteRepo.findInviteForStudent.mockResolvedValueOnce({
-        id: inviteId,
-        status: GroupInviteStatus.ACCEPTED,
-      } as any);
+    it.each([
+      ['already_accepted', 'TEACHER_REQUEST_ALREADY_ACCEPTED'],
+      ['already_declined', 'TEACHER_REQUEST_ALREADY_DECLINED'],
+    ] as const)('maps %s to its stable domain code', async (outcome, code) => {
+      groupInviteRepo.respondToPendingTeacherRequest.mockResolvedValueOnce({
+        outcome,
+      });
 
       await expect(
         service.respondToRequest(studentId, inviteId, {
           action: TeacherRequestAction.ACCEPT,
         }),
-      ).rejects.toThrow('Invite already processed');
+      ).rejects.toMatchObject({ code });
     });
 
-    it('should throw if invite is expired', async () => {
-      groupInviteRepo.findInviteForStudent.mockResolvedValueOnce({
-        id: inviteId,
-        status: GroupInviteStatus.PENDING,
-        expiresAt: new Date(Date.now() - 1000),
-      } as any);
-
-      await expect(
-        service.respondToRequest(studentId, inviteId, {
-          action: TeacherRequestAction.ACCEPT,
-        }),
-      ).rejects.toThrow('Invite has expired');
-    });
-
-    it('should decline invite and return DECLINED status', async () => {
-      groupInviteRepo.findInviteForStudent.mockResolvedValueOnce({
-        id: inviteId,
-        status: GroupInviteStatus.PENDING,
-        expiresAt: null,
-      } as any);
-
-      groupInviteRepo.markInviteDeclined.mockResolvedValueOnce({} as any);
+    it('declines a pending request without consulting expiresAt', async () => {
+      groupInviteRepo.respondToPendingTeacherRequest.mockResolvedValueOnce({
+        outcome: 'declined',
+      });
 
       const result = await service.respondToRequest(studentId, inviteId, {
         action: TeacherRequestAction.DECLINE,
       });
 
-      expect(groupInviteRepo.markInviteDeclined).toHaveBeenCalledWith(inviteId);
+      expect(
+        groupInviteRepo.respondToPendingTeacherRequest,
+      ).toHaveBeenCalledWith({
+        inviteId,
+        studentId,
+        accept: false,
+      });
       expect(result).toEqual({ status: GroupInviteStatus.DECLINED });
     });
 
     it('should throw if group student role not configured on ACCEPT', async () => {
-      groupInviteRepo.findInviteForStudent.mockResolvedValueOnce({
-        id: inviteId,
-        status: GroupInviteStatus.PENDING,
-        expiresAt: null,
-        group: {
-          members: [],
-        },
-        groupId: 100,
-      } as any);
-
-      roleRepo.findGroupRole.mockResolvedValueOnce(null as any);
+      groupInviteRepo.respondToPendingTeacherRequest.mockResolvedValueOnce({
+        outcome: 'student_role_not_configured',
+      });
 
       await expect(
         service.respondToRequest(studentId, inviteId, {
@@ -332,58 +400,22 @@ describe('TeacherRequestsService (unit, manual DI)', () => {
       ).rejects.toThrow('Group student role not configured');
     });
 
-    it('should accept invite and NOT add member if already in group', async () => {
-      groupInviteRepo.findInviteForStudent.mockResolvedValueOnce({
-        id: inviteId,
-        status: GroupInviteStatus.PENDING,
-        expiresAt: null,
+    it('accepts through one atomic repository operation', async () => {
+      groupInviteRepo.respondToPendingTeacherRequest.mockResolvedValueOnce({
+        outcome: 'accepted',
         groupId: 100,
-        group: {
-          members: [{ userId: studentId, isActive: true }],
-        },
-      } as any);
-
-      roleRepo.findGroupRole.mockResolvedValueOnce({ id: 30 } as any); // student group role
-
-      groupInviteRepo.markInviteAccepted.mockResolvedValueOnce({} as any);
+      });
 
       const result = await service.respondToRequest(studentId, inviteId, {
         action: TeacherRequestAction.ACCEPT,
       });
 
-      expect(groupInviteRepo.markInviteAccepted).toHaveBeenCalledWith(inviteId);
-      expect(groupInviteRepo.addStudentToGroup).not.toHaveBeenCalled();
-      expect(result).toEqual({
-        status: GroupInviteStatus.ACCEPTED,
-        groupId: 100,
-      });
-    });
-
-    it('should accept invite and add student to group if not a member', async () => {
-      groupInviteRepo.findInviteForStudent.mockResolvedValueOnce({
-        id: inviteId,
-        status: GroupInviteStatus.PENDING,
-        expiresAt: null,
-        groupId: 100,
-        group: {
-          members: [],
-        },
-      } as any);
-
-      roleRepo.findGroupRole.mockResolvedValueOnce({ id: 30 } as any); // student group role
-
-      groupInviteRepo.markInviteAccepted.mockResolvedValueOnce({} as any);
-      groupInviteRepo.addStudentToGroup.mockResolvedValueOnce({} as any);
-
-      const result = await service.respondToRequest(studentId, inviteId, {
-        action: TeacherRequestAction.ACCEPT,
-      });
-
-      expect(groupInviteRepo.markInviteAccepted).toHaveBeenCalledWith(inviteId);
-      expect(groupInviteRepo.addStudentToGroup).toHaveBeenCalledWith({
-        groupId: 100,
+      expect(
+        groupInviteRepo.respondToPendingTeacherRequest,
+      ).toHaveBeenCalledWith({
+        inviteId,
         studentId,
-        studentGroupRoleId: 30,
+        accept: true,
       });
       expect(result).toEqual({
         status: GroupInviteStatus.ACCEPTED,
