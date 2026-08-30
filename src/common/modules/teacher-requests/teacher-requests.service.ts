@@ -2,8 +2,9 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-  ConflictException,
+  HttpStatus,
 } from '@nestjs/common';
+import { AppException } from 'common/errors';
 import { RoleRepository } from 'repositories/role.repository';
 import { UserRepository } from 'repositories/user.repository';
 import { GroupInviteRepository } from 'repositories/group-invite.repository';
@@ -13,7 +14,31 @@ import {
   RespondTeacherRequestDto,
   TeacherRequestAction,
 } from './dto/respond-teacher-request.dto';
-import { GroupInviteStatus } from '@prisma/client';
+import { GroupInviteStatus, Prisma } from '@prisma/client';
+
+const PENDING_TEACHER_REQUEST_INDEX =
+  'GroupInvite_one_pending_per_teacher_student_key';
+const PENDING_TEACHER_REQUEST_FIELDS = ['inviterId', 'inviteeId'] as const;
+
+function isPendingTeacherRequestConstraintViolation(error: unknown): boolean {
+  if (
+    !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+    error.code !== 'P2002'
+  ) {
+    return false;
+  }
+
+  const target = error.meta?.target;
+  if (target === PENDING_TEACHER_REQUEST_INDEX) {
+    return true;
+  }
+
+  return (
+    Array.isArray(target) &&
+    target.length === PENDING_TEACHER_REQUEST_FIELDS.length &&
+    PENDING_TEACHER_REQUEST_FIELDS.every((field) => target.includes(field))
+  );
+}
 
 @Injectable()
 export class TeacherRequestsService {
@@ -51,16 +76,33 @@ export class TeacherRequestsService {
       studentId,
     );
     if (pending) {
-      throw new ConflictException('Invite already pending');
+      throw new AppException(
+        HttpStatus.CONFLICT,
+        'TEACHER_REQUEST_ALREADY_PENDING',
+      );
     }
 
-    const { group, invite } =
-      await this.groupInviteRepo.createIndividualGroupWithInvite({
+    let created: Awaited<
+      ReturnType<GroupInviteRepository['createIndividualGroupWithInvite']>
+    >;
+    try {
+      created = await this.groupInviteRepo.createIndividualGroupWithInvite({
         teacherId,
         studentId,
         teacherGroupRoleId: teacherGroupRole.id,
         message,
       });
+    } catch (error) {
+      if (isPendingTeacherRequestConstraintViolation(error)) {
+        throw new AppException(
+          HttpStatus.CONFLICT,
+          'TEACHER_REQUEST_ALREADY_PENDING',
+        );
+      }
+      throw error;
+    }
+
+    const { group, invite } = created;
 
     const telegramContact = student.contacts?.find(
       (c) => c.contactType.name === 'telegram',
@@ -91,48 +133,35 @@ export class TeacherRequestsService {
     inviteId: number,
     dto: RespondTeacherRequestDto,
   ) {
-    const invite = await this.groupInviteRepo.findInviteForStudent(
+    const accept = dto.action === TeacherRequestAction.ACCEPT;
+    const result = await this.groupInviteRepo.respondToPendingTeacherRequest({
       inviteId,
       studentId,
-    );
+      accept,
+    });
 
-    if (!invite) {
-      throw new NotFoundException('Invite not found');
+    if (result.outcome === 'not_found') {
+      throw new AppException(HttpStatus.NOT_FOUND, 'TEACHER_REQUEST_NOT_FOUND');
     }
-
-    if (invite.status !== GroupInviteStatus.PENDING) {
-      throw new BadRequestException('Invite already processed');
+    if (result.outcome === 'already_accepted') {
+      throw new AppException(
+        HttpStatus.CONFLICT,
+        'TEACHER_REQUEST_ALREADY_ACCEPTED',
+      );
     }
-
-    if (invite.expiresAt && invite.expiresAt < new Date()) {
-      throw new BadRequestException('Invite has expired');
+    if (result.outcome === 'already_declined') {
+      throw new AppException(
+        HttpStatus.CONFLICT,
+        'TEACHER_REQUEST_ALREADY_DECLINED',
+      );
     }
-
-    if (dto.action === TeacherRequestAction.DECLINE) {
-      await this.groupInviteRepo.markInviteDeclined(invite.id);
-      return { status: GroupInviteStatus.DECLINED };
-    }
-
-    const studentGroupRole = await this.roleRepo.findGroupRole('student');
-    if (!studentGroupRole) {
+    if (result.outcome === 'student_role_not_configured') {
       throw new BadRequestException('Group student role not configured');
     }
-
-    await this.groupInviteRepo.markInviteAccepted(invite.id);
-
-    const activeMember = invite.group.members.find(
-      (m) => m.userId === studentId && m.isActive,
-    );
-
-    if (!activeMember) {
-      await this.groupInviteRepo.addStudentToGroup({
-        groupId: invite.groupId,
-        studentId,
-        studentGroupRoleId: studentGroupRole.id,
-      });
+    if (result.outcome === 'declined') {
+      return { status: GroupInviteStatus.DECLINED };
     }
-
-    return { status: GroupInviteStatus.ACCEPTED, groupId: invite.groupId };
+    return { status: GroupInviteStatus.ACCEPTED, groupId: result.groupId };
   }
 
   async getMyRequests(teacherId: number) {
@@ -158,22 +187,14 @@ export class TeacherRequestsService {
     accept: boolean,
   ) {
     const user = await this.userRepo.findByTelegramId(telegramId);
-    if (!user) throw new NotFoundException('Student not found');
-
-    try {
-      return await this.respondToRequest(user.id, inviteId, {
-        action: accept
-          ? TeacherRequestAction.ACCEPT
-          : TeacherRequestAction.DECLINE,
-      });
-    } catch (e: unknown) {
-      if (
-        e instanceof BadRequestException &&
-        e.message?.includes('Invite already processed')
-      ) {
-        throw new ConflictException('Invite already processed');
-      }
-      throw e;
+    if (!user) {
+      throw new AppException(HttpStatus.NOT_FOUND, 'TEACHER_REQUEST_NOT_FOUND');
     }
+
+    return this.respondToRequest(user.id, inviteId, {
+      action: accept
+        ? TeacherRequestAction.ACCEPT
+        : TeacherRequestAction.DECLINE,
+    });
   }
 }

@@ -2,7 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'common/modules/prisma/prisma.service';
 import { GroupInviteStatus } from '@prisma/client';
 
-const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+export type TeacherRequestResponseResult =
+  | { outcome: 'not_found' }
+  | { outcome: 'already_accepted' }
+  | { outcome: 'already_declined' }
+  | { outcome: 'student_role_not_configured' }
+  | { outcome: 'accepted'; groupId: number }
+  | { outcome: 'declined' };
 
 @Injectable()
 export class GroupInviteRepository {
@@ -38,7 +44,10 @@ export class GroupInviteRepository {
           inviteeId: studentId,
           status: GroupInviteStatus.PENDING,
           message: message ?? null,
-          expiresAt: new Date(Date.now() + THREE_DAYS_MS),
+          // Teaching requests are deliberately actionable until the student
+          // accepts or declines them. Keep the nullable schema field for
+          // historical/other invite data, but do not expire this flow.
+          expiresAt: null,
         },
       });
 
@@ -109,6 +118,88 @@ export class GroupInviteRepository {
         removedAt: null,
         joinedAt: new Date(),
       },
+    });
+  }
+
+  async respondToPendingTeacherRequest(args: {
+    inviteId: number;
+    studentId: number;
+    accept: boolean;
+  }): Promise<TeacherRequestResponseResult> {
+    return this.prisma.$transaction(async (tx) => {
+      const invite = await tx.groupInvite.findFirst({
+        where: { id: args.inviteId, inviteeId: args.studentId },
+        select: { id: true, groupId: true, status: true },
+      });
+
+      if (!invite) return { outcome: 'not_found' };
+      if (invite.status === GroupInviteStatus.ACCEPTED) {
+        return { outcome: 'already_accepted' };
+      }
+      if (invite.status === GroupInviteStatus.DECLINED) {
+        return { outcome: 'already_declined' };
+      }
+      if (invite.status !== GroupInviteStatus.PENDING) {
+        return { outcome: 'not_found' };
+      }
+
+      const studentGroupRole = args.accept
+        ? await tx.role.findFirst({
+            where: { name: 'student', scope: 'GROUP' },
+            select: { id: true },
+          })
+        : null;
+      if (args.accept && !studentGroupRole) {
+        return { outcome: 'student_role_not_configured' };
+      }
+
+      const status = args.accept
+        ? GroupInviteStatus.ACCEPTED
+        : GroupInviteStatus.DECLINED;
+      const transitioned = await tx.groupInvite.updateMany({
+        where: { id: invite.id, status: GroupInviteStatus.PENDING },
+        data: { status, respondedAt: new Date() },
+      });
+
+      // A concurrent callback may have completed between the read and write.
+      if (transitioned.count !== 1) {
+        const current = await tx.groupInvite.findUnique({
+          where: { id: invite.id },
+          select: { status: true },
+        });
+        if (current?.status === GroupInviteStatus.ACCEPTED) {
+          return { outcome: 'already_accepted' };
+        }
+        if (current?.status === GroupInviteStatus.DECLINED) {
+          return { outcome: 'already_declined' };
+        }
+        return { outcome: 'not_found' };
+      }
+
+      if (!args.accept) return { outcome: 'declined' };
+      await tx.groupMember.upsert({
+        where: {
+          groupId_userId: {
+            groupId: invite.groupId,
+            userId: args.studentId,
+          },
+        },
+        create: {
+          groupId: invite.groupId,
+          userId: args.studentId,
+          roleId: studentGroupRole!.id,
+          isActive: true,
+          removedAt: null,
+        },
+        update: {
+          roleId: studentGroupRole!.id,
+          isActive: true,
+          removedAt: null,
+          joinedAt: new Date(),
+        },
+      });
+
+      return { outcome: 'accepted', groupId: invite.groupId };
     });
   }
 

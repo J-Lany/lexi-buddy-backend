@@ -221,6 +221,9 @@ model GroupInvite {
   invitee User  @relation("GroupInviteInvitee", fields: [inviteeId], references: [id])
 
   @@unique([groupId, inviteeId, status])
+  // A PostgreSQL partial unique index additionally enforces at most one
+  // PENDING row per (inviterId, inviteeId). Prisma DSL cannot represent
+  // partial indexes; see migration 20260829113000_add_unique_pending_teacher_request.
 }
 
 // ---------- LESSONS & ASSIGNMENTS ----------
