@@ -251,22 +251,34 @@ export class UserRepository {
     const { q, take = 15, excludeTeacherId } = params;
 
     // Только цифры → это Telegram ID (ник в Telegram не может состоять из одних цифр).
-    // Иначе каждое слово запроса должно совпасть с ником, именем или фамилией.
-    const match: Prisma.UserWhereInput = /^\d+$/.test(q)
-      ? {
-          contacts: {
-            some: { contactValue: q, contactType: { name: 'telegram' } },
-          },
-        }
-      : {
-          AND: q.split(/\s+/).map((word) => ({
-            OR: [
-              { username: { startsWith: word, mode: 'insensitive' } },
-              { firstName: { contains: word, mode: 'insensitive' } },
-              { lastName: { contains: word, mode: 'insensitive' } },
-            ],
-          })),
-        };
+    // Иначе каждое слово запроса (от 2 символов, не больше 5 слов) должно
+    // совпасть с ником, именем или фамилией.
+    let match: Prisma.UserWhereInput;
+    if (/^\d+$/.test(q)) {
+      match = {
+        contacts: {
+          some: { contactValue: q, contactType: { name: 'telegram' } },
+        },
+      };
+    } else {
+      const words = q
+        .split(/\s+/)
+        .map((word) => word.replace(/^@+/, ''))
+        .filter((word) => word.length >= 2)
+        .slice(0, 5);
+
+      if (words.length === 0) return [];
+
+      match = {
+        AND: words.map((word) => ({
+          OR: [
+            { username: { startsWith: word, mode: 'insensitive' } },
+            { firstName: { contains: word, mode: 'insensitive' } },
+            { lastName: { contains: word, mode: 'insensitive' } },
+          ],
+        })),
+      };
+    }
 
     return this.prisma.user.findMany({
       where: {
@@ -297,9 +309,15 @@ export class UserRepository {
         firstName: true,
         lastName: true,
         level: true,
+        avatarUrl: true,
+        contacts: {
+          where: { contactType: { name: 'telegram' } },
+          select: { contactValue: true },
+          take: 1,
+        },
       },
       take,
-      orderBy: { username: 'asc' },
+      orderBy: [{ firstName: 'asc' }, { id: 'asc' }],
     });
   }
 }

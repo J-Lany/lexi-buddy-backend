@@ -169,6 +169,71 @@ describe('StudentsService (unit, manual DI)', () => {
   });
 
   // -------------------------------------------------------------------
+  // getAllStudents
+  // -------------------------------------------------------------------
+  describe('getAllStudents', () => {
+    it('should not search for queries shorter than 2 chars (after stripping @)', async () => {
+      const result = await service.getAllStudents(1, ' @a ');
+
+      expect(result).toEqual([]);
+      expect(userRepo.searchStudents).not.toHaveBeenCalled();
+    });
+
+    it('should return name parts, avatar and Telegram ID for students without username', async () => {
+      (userRepo.searchStudents as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 500,
+          username: null,
+          firstName: 'Anna',
+          lastName: null,
+          level: 'A1',
+          avatarUrl: null,
+          contacts: [{ contactValue: '123456789' }],
+        },
+        {
+          id: 501,
+          username: 'no_tg',
+          firstName: null,
+          lastName: null,
+          level: null,
+          avatarUrl: 'a.png',
+          contacts: [],
+        },
+      ]);
+
+      const result = await service.getAllStudents(1, '@Anna');
+
+      expect(userRepo.searchStudents).toHaveBeenCalledWith({
+        q: 'Anna',
+        take: 15,
+        excludeTeacherId: 1,
+      });
+      expect(result).toEqual([
+        {
+          id: 500,
+          username: null,
+          level: 'A1',
+          name: 'Anna',
+          firstName: 'Anna',
+          lastName: null,
+          avatarUrl: null,
+          telegramId: '123456789',
+        },
+        {
+          id: 501,
+          username: 'no_tg',
+          level: null,
+          name: '',
+          firstName: null,
+          lastName: null,
+          avatarUrl: 'a.png',
+          telegramId: null,
+        },
+      ]);
+    });
+  });
+
+  // -------------------------------------------------------------------
   // getGroups
   // -------------------------------------------------------------------
   describe('getGroups', () => {

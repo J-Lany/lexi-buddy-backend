@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { GroupRepository } from 'repositories/group-repository';
-import { StudentDto } from './dto/student.dto';
+import { StudentDto, StudentSearchResultDto } from './dto/student.dto';
 import { UserRepository } from 'repositories/user.repository';
 import { StudentsRepository } from 'repositories/student-repository';
 import { round1 } from 'common/utils/round';
@@ -35,7 +35,10 @@ export class StudentsService {
     }));
   }
 
-  async getAllStudents(teacherId: number, q: string): Promise<StudentDto[]> {
+  async getAllStudents(
+    teacherId: number,
+    q: string,
+  ): Promise<StudentSearchResultDto[]> {
     const query = (q ?? '').trim().replace(/^@+/, '');
 
     if (query.length < 2) return [];
@@ -51,6 +54,10 @@ export class StudentsService {
       username: u.username,
       level: u.level,
       name: u.firstName || u.lastName || '',
+      firstName: u.firstName,
+      lastName: u.lastName,
+      avatarUrl: u.avatarUrl,
+      telegramId: u.contacts[0]?.contactValue ?? null,
     }));
   }
 
