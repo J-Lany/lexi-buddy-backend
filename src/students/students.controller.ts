@@ -43,7 +43,9 @@ export class StudentsController {
   }
 
   @Get('search')
-  @ApiOperation({ summary: 'Search students by username' })
+  @ApiOperation({
+    summary: 'Search students by username, first/last name or Telegram ID',
+  })
   @ApiQuery({ name: 'q', type: String, required: true })
   @ApiOkResponse({ description: 'List of matching students' })
   async searchStudents(@Query('q') q: string, @CurrentUser() user: JwtPayload) {

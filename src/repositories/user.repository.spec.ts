@@ -330,3 +330,114 @@ describe('UserRepository — activation (concurrency & atomicity)', () => {
     });
   });
 });
+
+describe('UserRepository.searchStudents', () => {
+  const setup = () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const repo = new UserRepository({
+      user: { findMany },
+    } as unknown as PrismaService);
+    const argsOf = () =>
+      findMany.mock.calls[0][0] as {
+        where: Record<string, unknown>;
+        orderBy: unknown;
+      };
+    return { repo, findMany, argsOf };
+  };
+
+  const byWord = (word: string) => ({
+    OR: [
+      { username: { startsWith: word, mode: 'insensitive' } },
+      { firstName: { contains: word, mode: 'insensitive' } },
+      { lastName: { contains: word, mode: 'insensitive' } },
+    ],
+  });
+
+  it('ищет по Telegram ID, если запрос из одних цифр', async () => {
+    const { repo, argsOf } = setup();
+
+    await repo.searchStudents({ q: '123456789' });
+
+    expect(argsOf().where).toEqual({
+      role: { name: 'student' },
+      contacts: {
+        some: {
+          contactValue: '123456789',
+          contactType: { name: 'telegram' },
+        },
+      },
+    });
+  });
+
+  it('ищет каждое слово по нику, имени или фамилии', async () => {
+    const { repo, argsOf } = setup();
+
+    await repo.searchStudents({ q: 'Анна   Иванова' });
+
+    expect(argsOf().where).toEqual({
+      role: { name: 'student' },
+      AND: [byWord('Анна'), byWord('Иванова')],
+    });
+  });
+
+  it('запрос из цифр и букв ищет по имени, а не по Telegram ID', async () => {
+    const { repo, argsOf } = setup();
+
+    await repo.searchStudents({ q: '123abc' });
+
+    expect(argsOf().where).toEqual({
+      role: { name: 'student' },
+      AND: [byWord('123abc')],
+    });
+  });
+
+  it('снимает @ с каждого слова, отбрасывает слова короче 2 символов и берёт не больше 5', async () => {
+    const { repo, argsOf } = setup();
+
+    await repo.searchStudents({ q: 'а Анна @ivanov в1 в2 в3 в4 в5' });
+
+    expect(argsOf().where.AND).toEqual([
+      byWord('Анна'),
+      byWord('ivanov'),
+      byWord('в1'),
+      byWord('в2'),
+      byWord('в3'),
+    ]);
+  });
+
+  it('не ходит в базу, если не осталось слов от 2 символов', async () => {
+    const { repo, findMany } = setup();
+
+    const result = await repo.searchStudents({ q: 'а б @' });
+
+    expect(result).toEqual([]);
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('сохраняет фильтр по группам учителя вместе с условием поиска', async () => {
+    const { repo, argsOf } = setup();
+
+    await repo.searchStudents({ q: 'Анна', excludeTeacherId: 7 });
+
+    const where = argsOf().where;
+    expect(where.AND).toEqual([byWord('Анна')]);
+    expect(where.groupMemberships).toEqual({
+      none: {
+        isActive: true,
+        group: {
+          members: {
+            some: { userId: 7, isActive: true, role: { name: 'teacher' } },
+          },
+        },
+      },
+    });
+  });
+
+  it('сортирует по имени и id, а не по нику (у кого ника нет — не в хвосте)', async () => {
+    const { repo, argsOf } = setup();
+
+    await repo.searchStudents({ q: 'Анна' });
+
+    expect(argsOf().orderBy).toEqual([{ firstName: 'asc' }, { id: 'asc' }]);
+  });
+});

@@ -14,3 +14,17 @@ export class StudentDto {
   @ApiProperty({ required: false, nullable: true })
   username: string | null = null;
 }
+
+export class StudentSearchResultDto extends StudentDto {
+  @ApiProperty({ required: false, nullable: true })
+  firstName: string | null = null;
+
+  @ApiProperty({ required: false, nullable: true })
+  lastName: string | null = null;
+
+  @ApiProperty({ required: false, nullable: true })
+  avatarUrl: string | null = null;
+
+  @ApiProperty({ required: false, nullable: true })
+  telegramId: string | null = null;
+}
