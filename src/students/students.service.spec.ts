@@ -18,7 +18,7 @@ describe('StudentsService (unit, manual DI)', () => {
     };
 
     userRepo = {
-      searchStudentsByUsername: jest.fn(),
+      searchStudents: jest.fn(),
     };
 
     studentsRepo = {

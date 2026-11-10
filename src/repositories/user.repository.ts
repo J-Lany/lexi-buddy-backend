@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Language } from '@prisma/client';
+import { Language, Prisma } from '@prisma/client';
 import { PrismaService } from 'common/modules/prisma/prisma.service';
 
 @Injectable()
@@ -243,20 +243,35 @@ export class UserRepository {
     });
   }
 
-  async searchStudentsByUsername(params: {
+  async searchStudents(params: {
     q: string;
     take?: number;
     excludeTeacherId?: number;
   }) {
     const { q, take = 15, excludeTeacherId } = params;
 
+    // Только цифры → это Telegram ID (ник в Telegram не может состоять из одних цифр).
+    // Иначе каждое слово запроса должно совпасть с ником, именем или фамилией.
+    const match: Prisma.UserWhereInput = /^\d+$/.test(q)
+      ? {
+          contacts: {
+            some: { contactValue: q, contactType: { name: 'telegram' } },
+          },
+        }
+      : {
+          AND: q.split(/\s+/).map((word) => ({
+            OR: [
+              { username: { startsWith: word, mode: 'insensitive' } },
+              { firstName: { contains: word, mode: 'insensitive' } },
+              { lastName: { contains: word, mode: 'insensitive' } },
+            ],
+          })),
+        };
+
     return this.prisma.user.findMany({
       where: {
         role: { name: 'student' },
-        username: {
-          startsWith: q,
-          mode: 'insensitive',
-        },
+        ...match,
         ...(excludeTeacherId
           ? {
               groupMemberships: {

@@ -40,7 +40,7 @@ export class StudentsService {
 
     if (query.length < 2) return [];
 
-    const users = await this.userRepo.searchStudentsByUsername({
+    const users = await this.userRepo.searchStudents({
       q: query,
       take: 15,
       excludeTeacherId: teacherId,

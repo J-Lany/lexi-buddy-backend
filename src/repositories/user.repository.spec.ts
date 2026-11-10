@@ -330,3 +330,49 @@ describe('UserRepository — activation (concurrency & atomicity)', () => {
     });
   });
 });
+
+describe('UserRepository.searchStudents', () => {
+  const setup = () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const repo = new UserRepository({
+      user: { findMany },
+    } as unknown as PrismaService);
+    const whereOf = (): unknown =>
+      (findMany.mock.calls[0][0] as { where: unknown }).where;
+    return { repo, whereOf };
+  };
+
+  it('ищет по Telegram ID, если запрос из одних цифр', async () => {
+    const { repo, whereOf } = setup();
+
+    await repo.searchStudents({ q: '123456789' });
+
+    expect(whereOf()).toEqual({
+      role: { name: 'student' },
+      contacts: {
+        some: {
+          contactValue: '123456789',
+          contactType: { name: 'telegram' },
+        },
+      },
+    });
+  });
+
+  it('ищет каждое слово по нику, имени или фамилии', async () => {
+    const { repo, whereOf } = setup();
+
+    await repo.searchStudents({ q: 'Анна Иванова' });
+
+    const byWord = (word: string) => ({
+      OR: [
+        { username: { startsWith: word, mode: 'insensitive' } },
+        { firstName: { contains: word, mode: 'insensitive' } },
+        { lastName: { contains: word, mode: 'insensitive' } },
+      ],
+    });
+    expect(whereOf()).toEqual({
+      role: { name: 'student' },
+      AND: [byWord('Анна'), byWord('Иванова')],
+    });
+  });
+});
